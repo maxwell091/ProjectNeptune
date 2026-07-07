@@ -75,6 +75,10 @@
             <span id="search-count">0 matches</span>
           </div>
           <div class="nav-actions">
+            <button type="button" id="edit-mode-toggle" class="btn-warning small">Enable edit mode</button>
+            <button type="button" id="undo-change" class="btn-secondary small" disabled>Undo</button>
+            <button type="button" id="redo-change" class="btn-secondary small" disabled>Redo</button>
+            <button type="button" id="undo-all" class="btn-secondary small" disabled>Undo all</button>
             <button type="button" id="expand-selected" class="btn-secondary small" disabled>Expand children</button>
             <button type="button" id="collapse-selected" class="btn-secondary small" disabled>Collapse children</button>
             <button type="button" id="expand-all" class="btn-secondary small">Expand all</button>
@@ -106,10 +110,38 @@
             <p>Select a portfolio or branch in the tree</p>
           </div>
         </div>
+        <div class="audit-panel">
+          <div class="audit-header">
+            <div>
+              <h3>Change Audit</h3>
+              <p id="audit-count">No changes yet</p>
+            </div>
+          </div>
+          <ol id="audit-list" class="audit-list">
+            <li class="audit-empty">Edits and moves will appear here.</li>
+          </ol>
+        </div>
       </aside>
     </main>
 
     <div id="tooltip" class="tooltip" hidden></div>
+
+    <div id="confirm-dialog" class="dialog-overlay" hidden>
+      <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+        <div id="dialog-icon" class="dialog-icon warning" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h2 id="dialog-title">Confirm action</h2>
+        <p id="dialog-message"></p>
+        <ul id="dialog-details" class="dialog-details"></ul>
+        <div class="dialog-actions">
+          <button type="button" id="dialog-cancel" class="btn-secondary">Cancel</button>
+          <button type="button" id="dialog-confirm" class="btn-warning">Confirm</button>
+        </div>
+      </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <script src="{{ url_for('static', filename='tree.js') }}"></script>

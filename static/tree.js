@@ -10,12 +10,25 @@ const datasetName = document.querySelector("#dataset-name");
 const datasetMeta = document.querySelector("#dataset-meta");
 const treeSearch = document.querySelector("#tree-search");
 const searchCount = document.querySelector("#search-count");
+const editModeToggle = document.querySelector("#edit-mode-toggle");
+const undoButton = document.querySelector("#undo-change");
+const redoButton = document.querySelector("#redo-change");
+const undoAllButton = document.querySelector("#undo-all");
 const expandSelectedButton = document.querySelector("#expand-selected");
 const collapseSelectedButton = document.querySelector("#collapse-selected");
 const expandAllButton = document.querySelector("#expand-all");
 const collapseAllButton = document.querySelector("#collapse-all");
 const focusSelectedButton = document.querySelector("#focus-selected");
 const resetViewButton = document.querySelector("#reset-view");
+const auditCount = document.querySelector("#audit-count");
+const auditList = document.querySelector("#audit-list");
+const confirmDialog = document.querySelector("#confirm-dialog");
+const dialogIcon = document.querySelector("#dialog-icon");
+const dialogTitle = document.querySelector("#dialog-title");
+const dialogMessage = document.querySelector("#dialog-message");
+const dialogDetails = document.querySelector("#dialog-details");
+const dialogCancelButton = document.querySelector("#dialog-cancel");
+const dialogConfirmButton = document.querySelector("#dialog-confirm");
 
 const ALLOWED_EXTENSIONS = [".csv", ".xlsx", ".xls", ".ods"];
 const PORTFOLIO_FILE_TYPES = [
@@ -38,6 +51,14 @@ let draggingId = null;
 let selectedFile = null;
 let dragMoved = false;
 let latestNodePositions = new Map();
+let originalTreeSnapshot = null;
+let undoStack = [];
+let redoStack = [];
+let auditEntries = [];
+let changedNodeIds = new Set();
+let editModeEnabled = false;
+let pendingFieldSnapshot = null;
+let dialogResolve = null;
 
 const DRAG_CLICK_DISTANCE = 8;
 const LEVEL_GAP = 230;
@@ -64,6 +85,20 @@ fileInput.addEventListener("change", () => {
   setSelectedFile(fileInput.files[0] || null);
 });
 treeSearch.addEventListener("input", handleSearch);
+editModeToggle.addEventListener("click", toggleEditMode);
+undoButton.addEventListener("click", undoLastChange);
+redoButton.addEventListener("click", redoLastChange);
+undoAllButton.addEventListener("click", undoAllChanges);
+dialogCancelButton.addEventListener("click", () => closeConfirmDialog(false));
+dialogConfirmButton.addEventListener("click", () => closeConfirmDialog(true));
+confirmDialog.addEventListener("click", (event) => {
+  if (event.target === confirmDialog) closeConfirmDialog(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !confirmDialog.hidden) {
+    closeConfirmDialog(false);
+  }
+});
 expandSelectedButton.addEventListener("click", () => {
   const selectedNode = findNode(selectedId, treeData);
   if (selectedNode) expandSelectedNode(selectedNode);
@@ -163,6 +198,14 @@ function applyDataset(payload) {
   updateNodeTypes(treeData);
   updatePaths(treeData, []);
   updateDepths(treeData, 1);
+  originalTreeSnapshot = cloneTree(treeData);
+  undoStack = [];
+  redoStack = [];
+  auditEntries = [];
+  changedNodeIds = new Set();
+  editModeEnabled = false;
+  updateEditModeUi();
+  renderAudit();
 
   datasetName.textContent = payload.sourceName || "Loaded portfolio";
   datasetMeta.textContent = `${payload.rowCount || 0} rows · ${
@@ -287,9 +330,16 @@ function render() {
             return;
           }
 
-          const target = closestDropTarget(event.sourceEvent);
-          if (target && moveNode(d.data.id, target.data.id)) {
+          if (!editModeEnabled) {
+            showMessage("Enable edit mode before moving portfolios.");
+            render();
             selectNode(d.data);
+            return;
+          }
+
+          const target = closestDropTarget(event.sourceEvent);
+          if (target) {
+            moveNodeWithHistory(d.data.id, target.data.id, "drag/drop move");
           }
           render();
           event.sourceEvent?.stopPropagation?.();
@@ -320,6 +370,7 @@ function nodeClass(data) {
   const classes = ["node", data.type || "leaf"];
   if (data.id === selectedId) classes.push("selected");
   if (data.id === dropTargetId) classes.push("drop-target");
+  if (changedNodeIds.has(data.id)) classes.push("changed");
   return classes.join(" ");
 }
 
@@ -340,24 +391,26 @@ function selectNode(data) {
 
       <label class="editor-field">
         <span>Full Name</span>
-        <input id="edit-name" type="text" value="${escapeAttribute(data.name || "")}">
+        <input id="edit-name" type="text" value="${escapeAttribute(data.name || "")}" ${editModeEnabled ? "" : "disabled"}>
       </label>
 
       <label class="editor-field">
         <span>Currency</span>
-        <input id="edit-currency" type="text" value="${escapeAttribute(data.currency || "")}" maxlength="12">
+        <input id="edit-currency" type="text" value="${escapeAttribute(data.currency || "")}" maxlength="12" ${editModeEnabled ? "" : "disabled"}>
       </label>
 
       <label class="editor-field">
         <span>Move Under Parent</span>
-        <select id="edit-parent" ${data.id === treeData.id ? "disabled" : ""}>
+        <select id="edit-parent" ${editModeEnabled && data.id !== treeData.id ? "" : "disabled"}>
           ${parentOptions}
         </select>
       </label>
+      ${editModeEnabled ? "" : '<p class="edit-mode-note">Enable edit mode to change name, currency, or location.</p>'}
 
       <div class="editor-row">
         <span class="type-badge ${typeClass}">${typeLabel}</span>
         <span class="children-badge">${data.children?.length || 0} children</span>
+        ${changedNodeIds.has(data.id) ? '<span class="changed-badge">Changed</span>' : ""}
       </div>
 
       <div class="detail-item">
@@ -380,13 +433,30 @@ function bindEditor(data) {
   const currencyInput = document.querySelector("#edit-currency");
   const parentSelect = document.querySelector("#edit-parent");
 
+  nameInput?.addEventListener("focus", () => {
+    pendingFieldSnapshot = cloneTree(treeData);
+  });
+
   nameInput?.addEventListener("input", (event) => {
     data.name = event.target.value;
   });
 
   nameInput?.addEventListener("change", () => {
+    if (pendingFieldSnapshot) {
+      recordChange({
+        type: "Name",
+        nodeId: data.id,
+        summary: `${data.ticker}: full name changed`,
+        before: pendingFieldSnapshot,
+      });
+      pendingFieldSnapshot = null;
+    }
     render();
     selectNode(data);
+  });
+
+  currencyInput?.addEventListener("focus", () => {
+    pendingFieldSnapshot = cloneTree(treeData);
   });
 
   currencyInput?.addEventListener("input", (event) => {
@@ -395,18 +465,22 @@ function bindEditor(data) {
   });
 
   currencyInput?.addEventListener("change", () => {
+    if (pendingFieldSnapshot) {
+      recordChange({
+        type: "Currency",
+        nodeId: data.id,
+        summary: `${data.ticker}: currency changed to ${data.currency || "blank"}`,
+        before: pendingFieldSnapshot,
+      });
+      pendingFieldSnapshot = null;
+    }
     render();
     selectNode(data);
   });
 
   parentSelect?.addEventListener("change", (event) => {
     const newParentId = event.target.value;
-    if (newParentId && moveNode(data.id, newParentId)) {
-      updateDepths(treeData, 1);
-      render();
-      selectNode(data);
-      focusNode(data.id);
-    }
+    if (newParentId) moveNodeWithHistory(data.id, newParentId, "editor move");
   });
 }
 
@@ -414,6 +488,216 @@ function updateSelectedActionButtons(data) {
   const canToggleChildren = Boolean(data && hasChildren(data));
   expandSelectedButton.disabled = !canToggleChildren;
   collapseSelectedButton.disabled = !canToggleChildren;
+}
+
+async function toggleEditMode() {
+  if (!editModeEnabled) {
+    const confirmed = await openConfirmDialog({
+      title: "Enter Edit Mode?",
+      message: "You are about to make live changes to the portfolio tree in this browser session.",
+      details: [
+        "Edit full name, currency, and portfolio location",
+        "Drag and drop nodes to model rebalancing moves",
+        "Every change is tracked in the audit log",
+        "Use Undo, Redo, or Undo all before reloading",
+      ],
+      confirmText: "Enable edit mode",
+      cancelText: "Stay in view mode",
+      variant: "warning",
+    });
+    if (!confirmed) return;
+    editModeEnabled = true;
+  } else {
+    editModeEnabled = false;
+  }
+
+  updateEditModeUi();
+  const selectedNode = findNode(selectedId, treeData);
+  if (selectedNode) selectNode(selectedNode);
+}
+
+function updateEditModeUi() {
+  editModeToggle.textContent = editModeEnabled ? "Exit edit mode" : "Enable edit mode";
+  editModeToggle.classList.toggle("active", editModeEnabled);
+  undoButton.disabled = undoStack.length === 0;
+  redoButton.disabled = redoStack.length === 0;
+  undoAllButton.disabled = undoStack.length === 0;
+}
+
+function recordChange({ type, nodeId, summary, before }) {
+  const after = cloneTree(treeData);
+  if (sameSnapshot(before, after)) return;
+
+  undoStack.push({
+    type,
+    nodeId,
+    summary,
+    before,
+    after,
+    timestamp: new Date().toLocaleTimeString(),
+  });
+  redoStack = [];
+  auditEntries.push({ type, nodeId, summary, timestamp: new Date().toLocaleTimeString() });
+  refreshChangeState();
+}
+
+function undoLastChange() {
+  const entry = undoStack.pop();
+  if (!entry) return;
+
+  redoStack.push(entry);
+  restoreTreeSnapshot(entry.before, entry.nodeId);
+}
+
+function redoLastChange() {
+  const entry = redoStack.pop();
+  if (!entry) return;
+
+  undoStack.push(entry);
+  restoreTreeSnapshot(entry.after, entry.nodeId);
+}
+
+async function undoAllChanges() {
+  if (!undoStack.length || !originalTreeSnapshot) return;
+  const confirmed = await openConfirmDialog({
+    title: "Undo All Changes?",
+    message: "This will restore the portfolio tree to the state it had when the dataset was loaded.",
+    details: [
+      `${auditEntries.length} tracked change${auditEntries.length === 1 ? "" : "s"} will be cleared`,
+      "You can still use Redo to bring changes back",
+    ],
+    confirmText: "Undo all changes",
+    cancelText: "Keep current changes",
+    variant: "danger",
+  });
+  if (!confirmed) return;
+
+  redoStack = [...undoStack].reverse();
+  undoStack = [];
+  auditEntries = [];
+  restoreTreeSnapshot(originalTreeSnapshot, selectedId);
+}
+
+function openConfirmDialog({
+  title,
+  message,
+  details = [],
+  confirmText = "Confirm",
+  cancelText = "Cancel",
+  variant = "warning",
+}) {
+  return new Promise((resolve) => {
+    dialogResolve = resolve;
+    dialogTitle.textContent = title;
+    dialogMessage.textContent = message;
+    dialogConfirmButton.textContent = confirmText;
+    dialogCancelButton.textContent = cancelText;
+    dialogIcon.className = `dialog-icon ${variant}`;
+
+    if (details.length) {
+      dialogDetails.hidden = false;
+      dialogDetails.innerHTML = details
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("");
+    } else {
+      dialogDetails.hidden = true;
+      dialogDetails.innerHTML = "";
+    }
+
+    dialogConfirmButton.className =
+      variant === "danger" ? "btn-danger" : "btn-warning";
+    confirmDialog.hidden = false;
+    dialogConfirmButton.focus();
+  });
+}
+
+function closeConfirmDialog(result) {
+  if (confirmDialog.hidden) return;
+  confirmDialog.hidden = true;
+  if (dialogResolve) {
+    dialogResolve(result);
+    dialogResolve = null;
+  }
+}
+
+function restoreTreeSnapshot(snapshot, preferredSelectedId) {
+  treeData = cloneTree(snapshot);
+  updateNodeTypes(treeData);
+  updatePaths(treeData, []);
+  updateDepths(treeData, 1);
+  refreshChangeState();
+  render();
+
+  const selectedNode = findNode(preferredSelectedId, treeData) || treeData;
+  selectNode(selectedNode);
+}
+
+function refreshChangeState() {
+  changedNodeIds = changedNodesFromOriginal();
+  updateEditModeUi();
+  renderAudit();
+}
+
+function changedNodesFromOriginal() {
+  if (!treeData || !originalTreeSnapshot) return new Set();
+
+  const originalSignatures = nodeSignatureMap(originalTreeSnapshot);
+  const currentSignatures = nodeSignatureMap(treeData);
+  const changed = new Set();
+
+  for (const [nodeId, signature] of currentSignatures) {
+    if (originalSignatures.get(nodeId) !== signature) {
+      changed.add(nodeId);
+    }
+  }
+
+  return changed;
+}
+
+function nodeSignatureMap(root) {
+  const map = new Map();
+
+  function walk(node, parentId = "") {
+    map.set(
+      node.id,
+      JSON.stringify({
+        parentId,
+        name: node.name || "",
+        currency: node.currency || "",
+      })
+    );
+    for (const child of node.children || []) {
+      walk(child, node.id);
+    }
+  }
+
+  walk(root);
+  return map;
+}
+
+function renderAudit() {
+  auditCount.textContent = auditEntries.length
+    ? `${auditEntries.length} change${auditEntries.length === 1 ? "" : "s"} tracked`
+    : "No changes yet";
+
+  if (!auditEntries.length) {
+    auditList.innerHTML = '<li class="audit-empty">Edits and moves will appear here.</li>';
+    return;
+  }
+
+  auditList.innerHTML = auditEntries
+    .map(
+      (entry, index) => `
+        <li>
+          <span class="audit-index">${index + 1}</span>
+          <div>
+            <strong>${escapeHtml(entry.summary)}</strong>
+            <small>${escapeHtml(entry.type)} · ${escapeHtml(entry.timestamp)}</small>
+          </div>
+        </li>
+      `
+    )
+    .join("");
 }
 
 function parentSelectOptions(selectedNodeId, parentId) {
@@ -578,6 +862,34 @@ function closestDropTarget(sourceEvent) {
   return bestDistance <= 90 ? best : null;
 }
 
+function moveNodeWithHistory(sourceId, targetId, source) {
+  if (!editModeEnabled) {
+    showMessage("Enable edit mode before moving portfolios.");
+    return false;
+  }
+
+  const sourceNode = findNode(sourceId, treeData);
+  const targetNode = findNode(targetId, treeData);
+  const oldParentId = findParentId(sourceId, treeData);
+  if (!sourceNode || !targetNode || oldParentId === targetId) return false;
+
+  const before = cloneTree(treeData);
+  const moved = moveNode(sourceId, targetId);
+  if (!moved) return false;
+
+  const oldParentLabel = oldParentId || "root";
+  recordChange({
+    type: "Move",
+    nodeId: sourceId,
+    summary: `${sourceNode.ticker}: moved from ${oldParentLabel} to ${targetNode.ticker} (${source})`,
+    before,
+  });
+  render();
+  selectNode(sourceNode);
+  focusNode(sourceId);
+  return true;
+}
+
 function moveNode(sourceId, targetId) {
   if (sourceId === targetId || isDescendant(sourceId, targetId, treeData)) {
     return false;
@@ -702,4 +1014,12 @@ function escapeHtml(value) {
 
 function escapeAttribute(value) {
   return escapeHtml(value).replaceAll("`", "&#096;");
+}
+
+function cloneTree(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function sameSnapshot(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
