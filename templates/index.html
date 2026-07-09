@@ -117,9 +117,23 @@
               <p id="audit-count">No changes yet</p>
             </div>
           </div>
-          <ol id="audit-list" class="audit-list">
-            <li class="audit-empty">Edits and moves will appear here.</li>
-          </ol>
+          <div class="audit-table-wrap">
+            <table class="audit-table" aria-label="Change audit log">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Change</th>
+                  <th scope="col">Time</th>
+                </tr>
+              </thead>
+              <tbody id="audit-table-body">
+                <tr class="audit-empty-row">
+                  <td colspan="4">Edits and moves will appear here.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </aside>
     </main>

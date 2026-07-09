@@ -21,7 +21,7 @@ const collapseAllButton = document.querySelector("#collapse-all");
 const focusSelectedButton = document.querySelector("#focus-selected");
 const resetViewButton = document.querySelector("#reset-view");
 const auditCount = document.querySelector("#audit-count");
-const auditList = document.querySelector("#audit-list");
+const auditTableBody = document.querySelector("#audit-table-body");
 const confirmDialog = document.querySelector("#confirm-dialog");
 const dialogIcon = document.querySelector("#dialog-icon");
 const dialogTitle = document.querySelector("#dialog-title");
@@ -681,20 +681,23 @@ function renderAudit() {
     : "No changes yet";
 
   if (!auditEntries.length) {
-    auditList.innerHTML = '<li class="audit-empty">Edits and moves will appear here.</li>';
+    auditTableBody.innerHTML = `
+      <tr class="audit-empty-row">
+        <td colspan="4">Edits and moves will appear here.</td>
+      </tr>
+    `;
     return;
   }
 
-  auditList.innerHTML = auditEntries
+  auditTableBody.innerHTML = auditEntries
     .map(
       (entry, index) => `
-        <li>
-          <span class="audit-index">${index + 1}</span>
-          <div>
-            <strong>${escapeHtml(entry.summary)}</strong>
-            <small>${escapeHtml(entry.type)} · ${escapeHtml(entry.timestamp)}</small>
-          </div>
-        </li>
+        <tr>
+          <td class="audit-num">${index + 1}</td>
+          <td><span class="audit-type ${escapeAttribute(entry.type.toLowerCase())}">${escapeHtml(entry.type)}</span></td>
+          <td class="audit-summary">${escapeHtml(entry.summary)}</td>
+          <td class="audit-time">${escapeHtml(entry.timestamp)}</td>
+        </tr>
       `
     )
     .join("");
