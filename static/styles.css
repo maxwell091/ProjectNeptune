@@ -1102,6 +1102,22 @@ button:disabled:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.tooltip-details {
+  margin-top: 8px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.tooltip-details div + div {
+  margin-top: 4px;
+}
+
+.tooltip-label {
+  display: inline-block;
+  min-width: 68px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+}
+
 .dialog-overlay {
   position: fixed;
   inset: 0;

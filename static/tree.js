@@ -911,10 +911,19 @@ function parentSelectOptions(selectedNodeId, parentId) {
 
 function showTooltip(event, data) {
   const typeLabel = data.type === "branch" ? "Branch" : "Portfolio";
+  const childCount = data.children?.length || 0;
+  const parentId = findParentId(data.id, treeData);
+  const parent = parentId ? findNode(parentId, treeData) : null;
+  const parentLabel = parent ? parent.ticker || parent.name || "—" : "—";
+
   tooltip.innerHTML = `
     <strong>${escapeHtml(data.ticker || "")}</strong>
     ${escapeHtml(data.name || "")}<br>
     Currency: ${escapeHtml(data.currency || "N/A")}
+    <div class="tooltip-details">
+      <div><span class="tooltip-label">Parent</span> ${escapeHtml(parentLabel)}</div>
+      <div><span class="tooltip-label">Children</span> ${childCount}</div>
+    </div>
     <span class="tooltip-meta">${typeLabel}</span>
   `;
   tooltip.hidden = false;
