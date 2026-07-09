@@ -104,71 +104,87 @@
             <p class="details-subtitle">Inspect and edit the live tree</p>
           </div>
         </div>
-        <div id="details" class="details-body">
-          <div class="empty-state">
-            <span class="empty-icon">◎</span>
-            <p>Select a portfolio or branch in the tree</p>
-          </div>
+        <div class="side-tabs" role="tablist" aria-label="Selected node tools">
+          <button type="button" class="side-tab active" data-tab="edit" role="tab" aria-selected="true">Edit</button>
+          <button type="button" class="side-tab" data-tab="add" role="tab" aria-selected="false">Add</button>
+          <button type="button" class="side-tab" data-tab="audit" role="tab" aria-selected="false">Change Audit</button>
         </div>
-        <div class="bulk-panel">
-          <div class="bulk-header">
-            <div>
-              <h3>Add Multiple Portfolios</h3>
-              <p>Paste Excel rows: Full Name, Currency, Location</p>
+
+        <div class="tab-content">
+          <div id="tab-edit" class="tab-panel active" role="tabpanel">
+            <div id="details" class="details-body">
+              <div class="empty-state">
+                <span class="empty-icon">◎</span>
+                <p>Select a portfolio or branch in the tree</p>
+              </div>
             </div>
           </div>
-          <textarea
-            id="bulk-paste"
-            class="bulk-paste"
-            placeholder="Example:&#10;UK Equity Portfolio&#9;GBP&#9;BCPROP&#10;Euro Bond Portfolio&#9;EUR&#9;BCFUND"
-            rows="4"
-            disabled
-          ></textarea>
-          <div class="bulk-actions">
-            <button type="button" id="bulk-clear" class="btn-secondary small" disabled>Clear</button>
-            <button type="button" id="bulk-add" class="btn-primary small" disabled>Add rows</button>
-          </div>
-          <div class="bulk-table-wrap">
-            <table class="bulk-table" aria-label="Bulk portfolio rows">
-              <thead>
-                <tr>
-                  <th scope="col">Full Name</th>
-                  <th scope="col">Currency</th>
-                  <th scope="col">Location</th>
-                  <th scope="col">Status</th>
-                </tr>
-              </thead>
-              <tbody id="bulk-preview-body">
-                <tr class="bulk-empty-row">
-                  <td colspan="4">Enable edit mode, then paste rows from Excel.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div class="audit-panel">
-          <div class="audit-header">
-            <div>
-              <h3>Change Audit</h3>
-              <p id="audit-count">No changes yet</p>
+
+          <div id="tab-add" class="tab-panel" role="tabpanel" hidden>
+            <div class="bulk-panel">
+              <div class="bulk-header">
+                <div>
+                  <h3>Add Multiple Portfolios</h3>
+                  <p>Paste Excel rows: Full Name, Currency, Location</p>
+                </div>
+              </div>
+              <textarea
+                id="bulk-paste"
+                class="bulk-paste"
+                placeholder="Example:&#10;UK Equity Portfolio&#9;GBP&#9;BCPROP&#10;Euro Bond Portfolio&#9;EUR&#9;BCFUND"
+                rows="4"
+                disabled
+              ></textarea>
+              <div class="bulk-actions">
+                <button type="button" id="bulk-clear" class="btn-secondary small" disabled>Clear</button>
+                <button type="button" id="bulk-add" class="btn-primary small" disabled>Add rows</button>
+              </div>
+              <div class="bulk-table-wrap">
+                <table class="bulk-table" aria-label="Bulk portfolio rows">
+                  <thead>
+                    <tr>
+                      <th scope="col">Full Name</th>
+                      <th scope="col">Currency</th>
+                      <th scope="col">Location</th>
+                      <th scope="col">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bulk-preview-body">
+                    <tr class="bulk-empty-row">
+                      <td colspan="4">Enable edit mode, then paste rows from Excel.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-          <div class="audit-table-wrap">
-            <table class="audit-table" aria-label="Change audit log">
-              <thead>
-                <tr>
-                  <th scope="col">#</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">Change</th>
-                  <th scope="col">Time</th>
-                </tr>
-              </thead>
-              <tbody id="audit-table-body">
-                <tr class="audit-empty-row">
-                  <td colspan="4">Edits and moves will appear here.</td>
-                </tr>
-              </tbody>
-            </table>
+
+          <div id="tab-audit" class="tab-panel" role="tabpanel" hidden>
+            <div class="audit-panel">
+              <div class="audit-header">
+                <div>
+                  <h3>Change Audit</h3>
+                  <p id="audit-count">No changes yet</p>
+                </div>
+              </div>
+              <div class="audit-table-wrap">
+                <table class="audit-table" aria-label="Change audit log">
+                  <thead>
+                    <tr>
+                      <th scope="col">#</th>
+                      <th scope="col">Type</th>
+                      <th scope="col">Change</th>
+                      <th scope="col">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody id="audit-table-body">
+                    <tr class="audit-empty-row">
+                      <td colspan="4">Edits and moves will appear here.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </aside>

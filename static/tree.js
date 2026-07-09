@@ -33,6 +33,8 @@ const dialogMessage = document.querySelector("#dialog-message");
 const dialogDetails = document.querySelector("#dialog-details");
 const dialogCancelButton = document.querySelector("#dialog-cancel");
 const dialogConfirmButton = document.querySelector("#dialog-confirm");
+const sideTabs = document.querySelectorAll(".side-tab");
+const tabPanels = document.querySelectorAll(".tab-panel");
 
 const ALLOWED_EXTENSIONS = [".csv", ".xlsx", ".xls", ".ods"];
 const PORTFOLIO_FILE_TYPES = [
@@ -88,6 +90,9 @@ fetchTree();
 chooseFileButton.addEventListener("click", openFilePicker);
 fileInput.addEventListener("change", () => {
   setSelectedFile(fileInput.files[0] || null);
+});
+sideTabs.forEach((tab) => {
+  tab.addEventListener("click", () => activateTab(tab.dataset.tab));
 });
 treeSearch.addEventListener("input", handleSearch);
 editModeToggle.addEventListener("click", toggleEditMode);
@@ -191,6 +196,20 @@ async function openFilePicker() {
 function setSelectedFile(file) {
   selectedFile = file;
   fileNameLabel.textContent = file ? file.name : "No file chosen";
+}
+
+function activateTab(tabName) {
+  sideTabs.forEach((tab) => {
+    const active = tab.dataset.tab === tabName;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+  });
+
+  tabPanels.forEach((panel) => {
+    const active = panel.id === `tab-${tabName}`;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
 }
 
 function isAllowedFile(filename) {
