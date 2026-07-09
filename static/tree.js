@@ -447,6 +447,14 @@ function selectNode(data) {
         <dt>Path</dt>
         <dd>${escapeHtml(data.path || data.ticker || "")}</dd>
       </div>
+
+      ${
+        editModeEnabled && data.id !== treeData.id
+          ? `<div class="editor-actions">
+        <button type="button" id="delete-portfolio" class="btn-danger small">Delete portfolio</button>
+      </div>`
+          : ""
+      }
     </div>
   `;
   bindEditor(data);
@@ -512,6 +520,10 @@ function bindEditor(data) {
     const newParentId = event.target.value;
     if (newParentId) moveNodeWithHistory(data.id, newParentId, "editor move");
   });
+
+  document.querySelector("#delete-portfolio")?.addEventListener("click", () => {
+    deleteSelectedPortfolio(data);
+  });
 }
 
 function updateSelectedActionButtons(data) {
@@ -527,6 +539,7 @@ async function toggleEditMode() {
       message: "You are about to make live changes to the portfolio tree in this browser session.",
       details: [
         "Edit full name, currency, and portfolio location",
+        "Delete portfolios from the selected node panel",
         "Drag and drop nodes to model rebalancing moves",
         "Every change is tracked in the audit log",
         "Use Undo, Redo, or Undo all before reloading",
@@ -1100,6 +1113,84 @@ function moveNodeWithHistory(sourceId, targetId, source) {
   render();
   selectNode(sourceNode);
   focusNode(sourceId);
+  return true;
+}
+
+async function deleteSelectedPortfolio(data) {
+  if (!editModeEnabled) {
+    showMessage("Enable edit mode before deleting portfolios.");
+    return;
+  }
+
+  if (data.id === treeData.id) {
+    showMessage("The root portfolio group cannot be deleted.");
+    return;
+  }
+
+  const deletedNodes = flattenNodes(data);
+  const childCount = deletedNodes.length - 1;
+  const parentId = findParentId(data.id, treeData);
+  const parent = parentId ? findNode(parentId, treeData) : null;
+  const parentLabel = parent?.ticker || "root";
+  const details = [
+    `Ticker: ${data.ticker}`,
+    `Full name: ${data.name || "—"}`,
+    `Parent: ${parentLabel}`,
+  ];
+
+  if (childCount > 0) {
+    details.push(
+      `${childCount} child node${childCount === 1 ? "" : "s"} will also be removed`
+    );
+  }
+
+  details.push("You can undo this action from the toolbar");
+
+  const confirmed = await openConfirmDialog({
+    title: "Delete Portfolio?",
+    message:
+      childCount > 0
+        ? `This will remove ${data.ticker} and all nodes beneath it from this session.`
+        : `This will remove ${data.ticker} from this session.`,
+    details,
+    confirmText: "Delete portfolio",
+    cancelText: "Keep portfolio",
+    variant: "danger",
+  });
+  if (!confirmed) return;
+
+  const before = cloneTree(treeData);
+  const deleted = deleteNode(data.id);
+  if (!deleted) return;
+
+  const summary =
+    childCount > 0
+      ? `Deleted ${data.ticker} and ${childCount} child node${childCount === 1 ? "" : "s"} under ${parentLabel}`
+      : `Deleted portfolio ${data.ticker} from ${parentLabel}`;
+
+  recordChange({
+    type: "Delete",
+    nodeId: data.id,
+    summary,
+    before,
+  });
+
+  render();
+  updateSearchCount();
+  const nextSelection = parent || treeData;
+  selectNode(nextSelection);
+  focusNode(nextSelection.id);
+}
+
+function deleteNode(id) {
+  if (id === treeData.id) return false;
+
+  const detached = detachNode(id, treeData);
+  if (!detached) return false;
+
+  updateNodeTypes(treeData);
+  updatePaths(treeData, []);
+  updateDepths(treeData, 1);
   return true;
 }
 
