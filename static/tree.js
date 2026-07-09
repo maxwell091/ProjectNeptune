@@ -384,7 +384,7 @@ function render() {
     .attr("x", (d) => (hasChildren(d.data) ? -18 : 18))
     .attr("text-anchor", (d) => (hasChildren(d.data) ? "end" : "start"))
     .text((d) => {
-      const marker = d.data._collapsed ? " +" : "";
+      const marker = hasChildren(d.data) && d.data._collapsed ? " +" : "";
       return `${d.data.ticker}${marker}`;
     });
 
@@ -966,7 +966,11 @@ function updateSearchCount() {
 
 function setCollapsedState(node, collapsed) {
   if (!node) return;
-  node._collapsed = collapsed;
+  if (hasChildren(node)) {
+    node._collapsed = collapsed;
+  } else {
+    delete node._collapsed;
+  }
   for (const child of node.children || []) {
     setCollapsedState(child, collapsed);
   }
@@ -1008,7 +1012,9 @@ function setCollapsedStateForChildren(node, collapsed) {
 function expandAncestors(nodeId) {
   const path = findPathToNode(nodeId, treeData);
   for (const node of path) {
-    node._collapsed = false;
+    if (hasChildren(node)) {
+      node._collapsed = false;
+    }
   }
 }
 
