@@ -22,6 +22,10 @@ const focusSelectedButton = document.querySelector("#focus-selected");
 const resetViewButton = document.querySelector("#reset-view");
 const auditCount = document.querySelector("#audit-count");
 const auditTableBody = document.querySelector("#audit-table-body");
+const bulkPaste = document.querySelector("#bulk-paste");
+const bulkClearButton = document.querySelector("#bulk-clear");
+const bulkAddButton = document.querySelector("#bulk-add");
+const bulkPreviewBody = document.querySelector("#bulk-preview-body");
 const confirmDialog = document.querySelector("#confirm-dialog");
 const dialogIcon = document.querySelector("#dialog-icon");
 const dialogTitle = document.querySelector("#dialog-title");
@@ -59,6 +63,7 @@ let changedNodeIds = new Set();
 let editModeEnabled = false;
 let pendingFieldSnapshot = null;
 let dialogResolve = null;
+let bulkRows = [];
 
 const DRAG_CLICK_DISTANCE = 8;
 const LEVEL_GAP = 230;
@@ -89,6 +94,9 @@ editModeToggle.addEventListener("click", toggleEditMode);
 undoButton.addEventListener("click", undoLastChange);
 redoButton.addEventListener("click", redoLastChange);
 undoAllButton.addEventListener("click", undoAllChanges);
+bulkPaste.addEventListener("input", handleBulkPaste);
+bulkClearButton.addEventListener("click", clearBulkRows);
+bulkAddButton.addEventListener("click", addBulkPortfolios);
 dialogCancelButton.addEventListener("click", () => closeConfirmDialog(false));
 dialogConfirmButton.addEventListener("click", () => closeConfirmDialog(true));
 confirmDialog.addEventListener("click", (event) => {
@@ -203,9 +211,12 @@ function applyDataset(payload) {
   redoStack = [];
   auditEntries = [];
   changedNodeIds = new Set();
+  bulkRows = [];
+  bulkPaste.value = "";
   editModeEnabled = false;
   updateEditModeUi();
   renderAudit();
+  renderBulkPreview();
 
   datasetName.textContent = payload.sourceName || "Loaded portfolio";
   datasetMeta.textContent = `${payload.rowCount || 0} rows · ${
@@ -522,6 +533,9 @@ function updateEditModeUi() {
   undoButton.disabled = undoStack.length === 0;
   redoButton.disabled = redoStack.length === 0;
   undoAllButton.disabled = undoStack.length === 0;
+  bulkPaste.disabled = !editModeEnabled;
+  bulkClearButton.disabled = !editModeEnabled || !bulkPaste.value.trim();
+  bulkAddButton.disabled = !editModeEnabled || !bulkRows.some((row) => row.valid);
 }
 
 function recordChange({ type, nodeId, summary, before }) {
@@ -618,6 +632,168 @@ function closeConfirmDialog(result) {
     dialogResolve(result);
     dialogResolve = null;
   }
+}
+
+function handleBulkPaste() {
+  bulkRows = parseBulkRows(bulkPaste.value);
+  renderBulkPreview();
+  updateEditModeUi();
+}
+
+function parseBulkRows(text) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !isBulkHeaderRow(splitPastedLine(line)))
+    .map((line) => {
+      const cells = splitPastedLine(line);
+      const [name = "", currency = "", location = ""] = cells.map((cell) => cell.trim());
+      const parent = findBulkParent(location);
+      const valid = Boolean(name && currency && parent);
+      const status = valid
+        ? "Ready"
+        : missingBulkFields(name, currency, location, parent).join(", ");
+
+      return {
+        name,
+        currency: currency.toUpperCase(),
+        location,
+        parent,
+        valid,
+        status,
+      };
+    });
+}
+
+function isBulkHeaderRow(cells) {
+  const normalized = cells.map((cell) => cell.trim().toLowerCase());
+  return (
+    normalized.includes("full name") &&
+    normalized.includes("currency") &&
+    (normalized.includes("location") || normalized.includes("parent"))
+  );
+}
+
+function findBulkParent(location) {
+  const normalizedLocation = location.trim().toLowerCase();
+  if (!normalizedLocation) return null;
+  return flattenNodes(treeData).find(
+    (node) =>
+      node.ticker.toLowerCase() === normalizedLocation ||
+      (node.name || "").toLowerCase() === normalizedLocation
+  );
+}
+
+function splitPastedLine(line) {
+  if (line.includes("\t")) return line.split("\t");
+  if (line.includes(",")) return line.split(",");
+  return line.split(/\s{2,}/);
+}
+
+function missingBulkFields(name, currency, location, parent) {
+  const missing = [];
+  if (!name) missing.push("Missing full name");
+  if (!currency) missing.push("Missing currency");
+  if (!location) missing.push("Missing location");
+  if (location && !parent) missing.push(`Unknown location: ${location}`);
+  return missing;
+}
+
+function renderBulkPreview() {
+  if (!bulkRows.length) {
+    bulkPreviewBody.innerHTML = `
+      <tr class="bulk-empty-row">
+        <td colspan="4">${editModeEnabled ? "Paste rows from Excel to preview them here." : "Enable edit mode, then paste rows from Excel."}</td>
+      </tr>
+    `;
+    return;
+  }
+
+  bulkPreviewBody.innerHTML = bulkRows
+    .map(
+      (row) => `
+        <tr class="${row.valid ? "valid" : "invalid"}">
+          <td>${escapeHtml(row.name)}</td>
+          <td>${escapeHtml(row.currency)}</td>
+          <td>${escapeHtml(row.location)}</td>
+          <td><span class="bulk-status ${row.valid ? "ready" : "error"}">${escapeHtml(row.status)}</span></td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function clearBulkRows() {
+  bulkPaste.value = "";
+  bulkRows = [];
+  renderBulkPreview();
+  updateEditModeUi();
+}
+
+function addBulkPortfolios() {
+  if (!editModeEnabled) {
+    showMessage("Enable edit mode before adding portfolios.");
+    return;
+  }
+
+  const validRows = bulkRows.filter((row) => row.valid);
+  if (!validRows.length) return;
+
+  const before = cloneTree(treeData);
+  const addedTickers = [];
+
+  for (const row of validRows) {
+    const ticker = uniqueTickerFromName(row.name);
+    const node = {
+      id: ticker,
+      ticker,
+      label: ticker,
+      name: row.name,
+      currency: row.currency,
+      type: "leaf",
+      path: ticker,
+      sourceRow: null,
+      childCount: 0,
+      children: [],
+    };
+    row.parent.children = row.parent.children || [];
+    row.parent.children.push(node);
+    row.parent._collapsed = false;
+    addedTickers.push(ticker);
+  }
+
+  updateNodeTypes(treeData);
+  updatePaths(treeData, []);
+  updateDepths(treeData, 1);
+  recordChange({
+    type: "Add",
+    nodeId: addedTickers.join(", "),
+    summary: `Added ${addedTickers.length} portfolio${addedTickers.length === 1 ? "" : "s"}: ${addedTickers.join(", ")}`,
+    before,
+  });
+  render();
+  const firstAdded = findNode(addedTickers[0], treeData);
+  if (firstAdded) {
+    selectNode(firstAdded);
+    focusNode(firstAdded.id);
+  }
+  clearBulkRows();
+}
+
+function uniqueTickerFromName(name) {
+  const base =
+    name
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "")
+      .slice(0, 12) || "PORTFOLIO";
+  let ticker = base;
+  let index = 1;
+  while (findNode(ticker, treeData)) {
+    ticker = `${base.slice(0, 10)}${String(index).padStart(2, "0")}`;
+    index += 1;
+  }
+  return ticker;
 }
 
 function restoreTreeSnapshot(snapshot, preferredSelectedId) {

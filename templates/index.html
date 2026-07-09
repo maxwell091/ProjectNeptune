@@ -110,6 +110,42 @@
             <p>Select a portfolio or branch in the tree</p>
           </div>
         </div>
+        <div class="bulk-panel">
+          <div class="bulk-header">
+            <div>
+              <h3>Add Multiple Portfolios</h3>
+              <p>Paste Excel rows: Full Name, Currency, Location</p>
+            </div>
+          </div>
+          <textarea
+            id="bulk-paste"
+            class="bulk-paste"
+            placeholder="Example:&#10;UK Equity Portfolio&#9;GBP&#9;BCPROP&#10;Euro Bond Portfolio&#9;EUR&#9;BCFUND"
+            rows="4"
+            disabled
+          ></textarea>
+          <div class="bulk-actions">
+            <button type="button" id="bulk-clear" class="btn-secondary small" disabled>Clear</button>
+            <button type="button" id="bulk-add" class="btn-primary small" disabled>Add rows</button>
+          </div>
+          <div class="bulk-table-wrap">
+            <table class="bulk-table" aria-label="Bulk portfolio rows">
+              <thead>
+                <tr>
+                  <th scope="col">Full Name</th>
+                  <th scope="col">Currency</th>
+                  <th scope="col">Location</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody id="bulk-preview-body">
+                <tr class="bulk-empty-row">
+                  <td colspan="4">Enable edit mode, then paste rows from Excel.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
         <div class="audit-panel">
           <div class="audit-header">
             <div>
