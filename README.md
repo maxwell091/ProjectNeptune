@@ -44,7 +44,7 @@ python app.py --data data/sample_portfolio.csv
 Then open:
 
 ```text
-http://127.0.0.1:5000
+http://127.0.0.1:5088
 ```
 
 You can also configure the data path with an environment variable:

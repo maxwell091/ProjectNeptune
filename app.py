@@ -16,6 +16,7 @@ from werkzeug.utils import secure_filename
 from portfolio_loader import PortfolioLoadError, load_portfolio, load_portfolio_upload
 
 
+DEFAULT_PORT = 5088
 DEFAULT_DATA = Path("portfolio tree input.csv")
 FALLBACK_DATA = Path("data/sample_portfolio.csv")
 ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".ods"}
@@ -91,7 +92,12 @@ def _parse_args() -> argparse.Namespace:
         "'portfolio tree input.csv', then data/sample_portfolio.csv.",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind.")
-    parser.add_argument("--port", default=5000, type=int, help="Port to run on.")
+    parser.add_argument(
+        "--port",
+        default=int(os.environ.get("PORT", DEFAULT_PORT)),
+        type=int,
+        help=f"Port to run on (default: {DEFAULT_PORT}).",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable Flask debug mode.")
     return parser.parse_args()
 
