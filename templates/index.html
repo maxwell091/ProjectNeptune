@@ -64,6 +64,7 @@
           <div class="legend" aria-label="Tree legend">
             <span class="legend-pill branch-pill"><i class="dot branch"></i> Branch</span>
             <span class="legend-pill leaf-pill"><i class="dot leaf"></i> Portfolio</span>
+            <span class="legend-pill error-pill"><i class="dot error"></i> QC Error</span>
           </div>
         </div>
         <div class="tree-nav" aria-label="Tree navigation controls">
@@ -88,7 +89,14 @@
           </div>
         </div>
         <div id="message" class="message" role="status"></div>
-        <div id="tree" class="tree-canvas"></div>
+        <div id="qc-error-callout" class="qc-error-callout" hidden></div>
+        <div class="tree-stage">
+          <div id="tree" class="tree-canvas"></div>
+          <label class="tree-scroll-control" aria-label="Scroll portfolio tree vertically">
+            <span>Scroll</span>
+            <input id="tree-scrollbar" type="range" min="0" max="100" value="50" orient="vertical">
+          </label>
+        </div>
       </section>
 
       <aside class="details-card">
@@ -107,6 +115,8 @@
         <div class="side-tabs" role="tablist" aria-label="Selected node tools">
           <button type="button" class="side-tab active" data-tab="edit" role="tab" aria-selected="true">Edit</button>
           <button type="button" class="side-tab" data-tab="add" role="tab" aria-selected="false">Add</button>
+          <button type="button" class="side-tab" data-tab="qc" role="tab" aria-selected="false">QC Report</button>
+          <button type="button" class="side-tab" data-tab="crossheld" role="tab" aria-selected="false">Cross-held</button>
           <button type="button" class="side-tab" data-tab="audit" role="tab" aria-selected="false">Change Audit</button>
         </div>
 
@@ -152,6 +162,75 @@
                   <tbody id="bulk-preview-body">
                     <tr class="bulk-empty-row">
                       <td colspan="4">Enable edit mode, then paste rows from Excel.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div id="tab-qc" class="tab-panel" role="tabpanel" hidden>
+            <div class="qc-panel">
+              <div class="audit-header">
+                <div>
+                  <h3>Quality Control Report</h3>
+                  <p id="qc-count">No QC errors</p>
+                </div>
+              </div>
+              <div class="report-filters">
+                <label>
+                  Error
+                  <select id="qc-filter-error">
+                    <option value="all">All Errors</option>
+                  </select>
+                </label>
+                <label>
+                  Level
+                  <select id="qc-filter-level">
+                    <option value="all">All Levels</option>
+                  </select>
+                </label>
+              </div>
+              <div class="audit-table-wrap report-table-wrap">
+                <table class="audit-table report-table" aria-label="Quality control errors">
+                  <thead>
+                    <tr>
+                      <th scope="col">Error Number</th>
+                      <th scope="col">Error</th>
+                      <th scope="col">CCY</th>
+                      <th scope="col">Level</th>
+                    </tr>
+                  </thead>
+                  <tbody id="qc-table-body">
+                    <tr class="audit-empty-row">
+                      <td colspan="4">No QC errors found.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div id="tab-crossheld" class="tab-panel" role="tabpanel" hidden>
+            <div class="qc-panel">
+              <div class="audit-header">
+                <div>
+                  <h3>Cross-held Analyzer</h3>
+                  <p id="crossheld-count">No cross-held portfolios</p>
+                </div>
+              </div>
+              <div class="audit-table-wrap report-table-wrap">
+                <table class="audit-table report-table" aria-label="Cross-held portfolios">
+                  <thead>
+                    <tr>
+                      <th scope="col">Portfolio</th>
+                      <th scope="col">Parents</th>
+                      <th scope="col">Occurrences</th>
+                    </tr>
+                  </thead>
+                  <tbody id="crossheld-table-body">
+                    <tr class="audit-empty-row">
+                      <td colspan="3">No cross-held portfolios found.</td>
                     </tr>
                   </tbody>
                 </table>

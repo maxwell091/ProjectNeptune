@@ -2,6 +2,7 @@ const treeElement = document.querySelector("#tree");
 const detailsElement = document.querySelector("#details");
 const tooltip = document.querySelector("#tooltip");
 const message = document.querySelector("#message");
+const qcErrorCallout = document.querySelector("#qc-error-callout");
 const uploadForm = document.querySelector("#upload-form");
 const fileInput = document.querySelector("#file-input");
 const chooseFileButton = document.querySelector("#choose-file");
@@ -20,8 +21,15 @@ const expandAllButton = document.querySelector("#expand-all");
 const collapseAllButton = document.querySelector("#collapse-all");
 const focusSelectedButton = document.querySelector("#focus-selected");
 const resetViewButton = document.querySelector("#reset-view");
+const treeScrollbar = document.querySelector("#tree-scrollbar");
 const auditCount = document.querySelector("#audit-count");
 const auditTableBody = document.querySelector("#audit-table-body");
+const qcCount = document.querySelector("#qc-count");
+const qcTableBody = document.querySelector("#qc-table-body");
+const qcFilterError = document.querySelector("#qc-filter-error");
+const qcFilterLevel = document.querySelector("#qc-filter-level");
+const crossheldCount = document.querySelector("#crossheld-count");
+const crossheldTableBody = document.querySelector("#crossheld-table-body");
 const bulkPaste = document.querySelector("#bulk-paste");
 const bulkClearButton = document.querySelector("#bulk-clear");
 const bulkAddButton = document.querySelector("#bulk-add");
@@ -37,6 +45,12 @@ const sideTabs = document.querySelectorAll(".side-tab");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
 const ALLOWED_EXTENSIONS = [".csv", ".xlsx", ".xls", ".ods"];
+const MAX_PORTFOLIO_NAME_LENGTH = 10;
+const MAX_TREE_DEPTH = 10;
+const VALID_CURRENCIES = new Set(
+  "AED,AFN,ALL,AMD,ANG,AOA,ARS,AUD,AWG,AZN,BAM,BBD,BDT,BGN,BHD,BIF,BMD,BND,BOB,BRL,BSD,BTN,BWP,BYN,BZD,CAD,CDF,CHF,CLP,CNY,COP,CRC,CUP,CVE,CZK,DJF,DKK,DOP,DZD,EGP,ERN,ETB,EUR,FJD,FKP,GBP,GEL,GHS,GIP,GMD,GNF,GTQ,GYD,HKD,HNL,HTG,HUF,IDR,ILS,INR,IQD,IRR,ISK,JMD,JOD,JPY,KES,KGS,KHR,KID,KMF,KPW,KRW,KWD,KYD,KZT,LAK,LBP,LKR,LRD,LSL,LYD,MAD,MDL,MGA,MKD,MMK,MNT,MOP,MRU,MUR,MVR,MWK,MXN,MYR,MZN,NAD,NGN,NIO,NOK,NPR,NZD,OMR,PAB,PEN,PGK,PHP,PKR,PLN,PYG,QAR,RON,RSD,RUB,RWF,SAR,SBD,SCR,SDG,SEK,SGD,SHP,SLE,SOS,SRD,SSP,STN,SYP,SZL,THB,TJS,TMT,TND,TOP,TRY,TTD,TVD,TWD,TZS,UAH,UGX,USD,UYU,UZS,VES,VND,VUV,WST,XAF,XCD,XCG,XDR,XOF,XPF,YER,ZAR,ZMW,ZWL"
+    .split(",")
+);
 const PORTFOLIO_FILE_TYPES = [
   {
     description: "Portfolio files",
@@ -62,10 +76,15 @@ let undoStack = [];
 let redoStack = [];
 let auditEntries = [];
 let changedNodeIds = new Set();
+let qcErrors = [];
+let qcErrorNodeIds = new Set();
+let crossHeldRows = [];
 let editModeEnabled = false;
 let pendingFieldSnapshot = null;
 let dialogResolve = null;
 let bulkRows = [];
+let currentTransform = d3.zoomIdentity;
+let verticalScrollState = null;
 
 const DRAG_CLICK_DISTANCE = 8;
 const LEVEL_GAP = 230;
@@ -81,7 +100,11 @@ const viewport = svg.append("g");
 const zoom = d3
   .zoom()
   .scaleExtent([0.25, 2.2])
-  .on("zoom", (event) => viewport.attr("transform", event.transform));
+  .on("zoom", (event) => {
+    currentTransform = event.transform;
+    viewport.attr("transform", currentTransform);
+    syncTreeScrollbar();
+  });
 
 svg.call(zoom);
 
@@ -102,6 +125,17 @@ undoAllButton.addEventListener("click", undoAllChanges);
 bulkPaste.addEventListener("input", handleBulkPaste);
 bulkClearButton.addEventListener("click", clearBulkRows);
 bulkAddButton.addEventListener("click", addBulkPortfolios);
+qcFilterError?.addEventListener("change", renderQcReport);
+qcFilterLevel?.addEventListener("change", renderQcReport);
+qcTableBody?.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-qc-error-id]");
+  if (row) focusQcError(row.dataset.qcErrorId);
+});
+crossheldTableBody?.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-node-id]");
+  if (row) focusReportNode(row.dataset.nodeId);
+});
+treeScrollbar?.addEventListener("input", handleTreeScrollbar);
 dialogCancelButton.addEventListener("click", () => closeConfirmDialog(false));
 dialogConfirmButton.addEventListener("click", () => closeConfirmDialog(true));
 confirmDialog.addEventListener("click", (event) => {
@@ -230,12 +264,17 @@ function applyDataset(payload) {
   redoStack = [];
   auditEntries = [];
   changedNodeIds = new Set();
+  qcErrors = [];
+  qcErrorNodeIds = new Set();
+  crossHeldRows = [];
   bulkRows = [];
   bulkPaste.value = "";
+  hideQcCallout();
   editModeEnabled = false;
   updateEditModeUi();
   renderAudit();
   renderBulkPreview();
+  refreshReports();
 
   datasetName.textContent = payload.sourceName || "Loaded portfolio";
   datasetMeta.textContent = `${payload.rowCount || 0} rows · ${
@@ -273,6 +312,7 @@ function render() {
       { x: node.y + startY, y: node.x + startX, node },
     ])
   );
+  updateTreeScrollbarState();
 
   const layer = viewport
     .append("g")
@@ -400,6 +440,7 @@ function nodeClass(data) {
   const classes = ["node", data.type || "leaf"];
   if (data.id === selectedId) classes.push("selected");
   if (data.id === dropTargetId) classes.push("drop-target");
+  if (qcErrorNodeIds.has(data.id)) classes.push("qc-error");
   if (changedNodeIds.has(data.id)) classes.push("changed");
   return classes.join(" ");
 }
@@ -426,7 +467,24 @@ function selectNode(data) {
 
       <label class="editor-field">
         <span>Currency</span>
-        <input id="edit-currency" type="text" value="${escapeAttribute(data.currency || "")}" maxlength="12" ${editModeEnabled ? "" : "disabled"}>
+        <div class="currency-combobox ${editModeEnabled ? "" : "disabled"}">
+          <input
+            id="edit-currency"
+            type="text"
+            value="${escapeAttribute(data.currency || "")}"
+            maxlength="3"
+            placeholder="Search currency"
+            autocomplete="off"
+            role="combobox"
+            aria-controls="currency-options"
+            aria-expanded="false"
+            ${editModeEnabled ? "" : "disabled"}
+          >
+          <div id="currency-options" class="currency-options" role="listbox" hidden>
+            ${currencyOptionButtons(data.currency || "")}
+          </div>
+        </div>
+        ${editModeEnabled ? '<small class="field-hint">Search or select an approved 3-letter CCY code.</small>' : ""}
       </label>
 
       <label class="editor-field">
@@ -469,6 +527,7 @@ function refreshNodeClasses() {
 function bindEditor(data) {
   const nameInput = document.querySelector("#edit-name");
   const currencyInput = document.querySelector("#edit-currency");
+  const currencyOptions = document.querySelector("#currency-options");
   const parentSelect = document.querySelector("#edit-parent");
 
   nameInput?.addEventListener("focus", () => {
@@ -495,25 +554,45 @@ function bindEditor(data) {
 
   currencyInput?.addEventListener("focus", () => {
     pendingFieldSnapshot = cloneTree(treeData);
+    showCurrencyOptions(currencyInput, currencyOptions);
   });
 
   currencyInput?.addEventListener("input", (event) => {
     data.currency = event.target.value.toUpperCase();
     event.target.value = data.currency;
+    showCurrencyOptions(currencyInput, currencyOptions);
+  });
+
+  currencyInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      hideCurrencyOptions(currencyInput, currencyOptions);
+    }
+    if (event.key === "Enter") {
+      const firstOption = currencyOptions?.querySelector(".currency-option");
+      if (firstOption) {
+        event.preventDefault();
+        selectCurrencyOption(data, currencyInput, currencyOptions, firstOption.dataset.currency);
+      }
+    }
+  });
+
+  currencyInput?.addEventListener("blur", () => {
+    setTimeout(() => hideCurrencyOptions(currencyInput, currencyOptions), 120);
+  });
+
+  currencyOptions?.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+  });
+
+  currencyOptions?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-currency]");
+    if (option) {
+      selectCurrencyOption(data, currencyInput, currencyOptions, option.dataset.currency);
+    }
   });
 
   currencyInput?.addEventListener("change", () => {
-    if (pendingFieldSnapshot) {
-      recordChange({
-        type: "Currency",
-        nodeId: data.id,
-        summary: `${data.ticker}: currency changed to ${data.currency || "blank"}`,
-        before: pendingFieldSnapshot,
-      });
-      pendingFieldSnapshot = null;
-    }
-    render();
-    selectNode(data);
+    commitCurrencyChange(data, currencyInput);
   });
 
   parentSelect?.addEventListener("change", (event) => {
@@ -842,6 +921,7 @@ function restoreTreeSnapshot(snapshot, preferredSelectedId) {
 
 function refreshChangeState() {
   changedNodeIds = changedNodesFromOriginal();
+  refreshReports();
   updateEditModeUi();
   renderAudit();
 }
@@ -911,6 +991,231 @@ function renderAudit() {
     .join("");
 }
 
+function refreshReports() {
+  qcErrors = buildQcErrors();
+  qcErrorNodeIds = new Set(qcErrors.map((error) => error.nodeId));
+  crossHeldRows = buildCrossHeldRows();
+  renderQcFilters();
+  renderQcReport();
+  renderCrossHeldReport();
+}
+
+function buildQcErrors() {
+  if (!treeData) return [];
+
+  const errors = [];
+  for (const node of flattenNodes(treeData)) {
+    const currency = (node.currency || "").trim().toUpperCase();
+    const level = node.depth || 1;
+
+    if (currency && !VALID_CURRENCIES.has(currency)) {
+      addQcError(errors, node, "Invalid CCY", `Currency "${currency}" is not in the approved CCY list.`, currency, level);
+    }
+
+    if ((node.name || "").length > MAX_PORTFOLIO_NAME_LENGTH) {
+      addQcError(
+        errors,
+        node,
+        "Portfolio Name Length",
+        `Portfolio name is longer than ${MAX_PORTFOLIO_NAME_LENGTH} characters.`,
+        currency || "N/A",
+        level
+      );
+    }
+
+    if (level > MAX_TREE_DEPTH) {
+      addQcError(errors, node, "Tree Level Limit", `Level ${level} exceeds the ${MAX_TREE_DEPTH}-level tree limit.`, currency || "N/A", level);
+    }
+  }
+
+  return errors;
+}
+
+function addQcError(errors, node, type, message, currency, level) {
+  errors.push({
+    id: `qc-${errors.length + 1}`,
+    number: errors.length + 1,
+    nodeId: node.id,
+    ticker: node.ticker || node.id,
+    name: node.name || "",
+    path: node.path || node.ticker || "",
+    type,
+    message,
+    currency,
+    level,
+  });
+}
+
+function renderQcFilters() {
+  if (!qcFilterError || !qcFilterLevel) return;
+
+  const selectedError = qcFilterError.value || "all";
+  const selectedLevel = qcFilterLevel.value || "all";
+  const errorTypes = [...new Set(qcErrors.map((error) => error.type))].sort();
+  const levels = [...new Set(qcErrors.map((error) => error.level))].sort((a, b) => a - b);
+
+  qcFilterError.innerHTML = [
+    '<option value="all">All Errors</option>',
+    ...errorTypes.map((type) => `<option value="${escapeAttribute(type)}">${escapeHtml(type)}</option>`),
+  ].join("");
+  qcFilterLevel.innerHTML = [
+    '<option value="all">All Levels</option>',
+    ...levels.map((level) => `<option value="${level}">Level ${level}</option>`),
+  ].join("");
+
+  qcFilterError.value = errorTypes.includes(selectedError) ? selectedError : "all";
+  qcFilterLevel.value = levels.map(String).includes(selectedLevel) ? selectedLevel : "all";
+}
+
+function renderQcReport() {
+  if (!qcCount || !qcTableBody) return;
+
+  const filtered = filteredQcErrors();
+  qcCount.textContent = qcErrors.length
+    ? `${filtered.length} of ${qcErrors.length} QC error${qcErrors.length === 1 ? "" : "s"} shown`
+    : "No QC errors";
+
+  if (!filtered.length) {
+    qcTableBody.innerHTML = `
+      <tr class="audit-empty-row">
+        <td colspan="4">${qcErrors.length ? "No QC errors match the selected filters." : "No QC errors found."}</td>
+      </tr>
+    `;
+    return;
+  }
+
+  qcTableBody.innerHTML = filtered
+    .map(
+      (error) => `
+        <tr class="clickable-report-row" data-qc-error-id="${escapeAttribute(error.id)}">
+          <td class="audit-num">${error.number}</td>
+          <td class="audit-summary">
+            <strong>${escapeHtml(error.type)}</strong>
+            <span>${escapeHtml(error.ticker)}: ${escapeHtml(error.message)}</span>
+          </td>
+          <td>${escapeHtml(error.currency || "N/A")}</td>
+          <td>Level ${escapeHtml(error.level)}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function filteredQcErrors() {
+  const selectedError = qcFilterError?.value || "all";
+  const selectedLevel = qcFilterLevel?.value || "all";
+  return qcErrors.filter(
+    (error) =>
+      (selectedError === "all" || error.type === selectedError) &&
+      (selectedLevel === "all" || String(error.level) === selectedLevel)
+  );
+}
+
+function focusQcError(errorId) {
+  const error = qcErrors.find((item) => item.id === errorId);
+  if (!error) return;
+
+  focusReportNode(error.nodeId);
+  showQcCallout(error);
+}
+
+function focusReportNode(nodeId) {
+  const node = findNode(nodeId, treeData);
+  if (!node) return;
+
+  expandAncestors(nodeId);
+  render();
+  selectNode(node);
+  focusNode(nodeId);
+}
+
+function showQcCallout(error) {
+  if (!qcErrorCallout) return;
+
+  qcErrorCallout.innerHTML = `
+    <button type="button" class="qc-callout-close" aria-label="Close QC error">&times;</button>
+    <strong>QC Error #${escapeHtml(error.number)}: ${escapeHtml(error.type)}</strong>
+    <span>${escapeHtml(error.ticker)} · Level ${escapeHtml(error.level)} · CCY ${escapeHtml(error.currency || "N/A")}</span>
+    <p>${escapeHtml(error.message)}</p>
+  `;
+  qcErrorCallout.hidden = false;
+  qcErrorCallout.querySelector(".qc-callout-close")?.addEventListener("click", hideQcCallout);
+}
+
+function hideQcCallout() {
+  if (qcErrorCallout) qcErrorCallout.hidden = true;
+}
+
+function buildCrossHeldRows() {
+  if (!treeData) return [];
+
+  const groups = new Map();
+  walkNodeOccurrences(treeData, null, (node, parent) => {
+    if (!parent || node.id === treeData.id) return;
+    const key = (node.ticker || node.id || "").trim().toUpperCase();
+    if (!key) return;
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        ticker: node.ticker || node.id,
+        name: node.name || "",
+        firstNodeId: node.id,
+        parents: new Map(),
+        occurrences: 0,
+      });
+    }
+
+    const group = groups.get(key);
+    const parentLabel = parent.ticker || parent.name || parent.id;
+    group.parents.set(parent.id, parentLabel);
+    group.occurrences += 1;
+  });
+
+  return [...groups.values()]
+    .filter((group) => group.parents.size > 1 || group.occurrences > 1)
+    .sort((left, right) => left.ticker.localeCompare(right.ticker));
+}
+
+function renderCrossHeldReport() {
+  if (!crossheldCount || !crossheldTableBody) return;
+
+  crossheldCount.textContent = crossHeldRows.length
+    ? `${crossHeldRows.length} cross-held portfolio${crossHeldRows.length === 1 ? "" : "s"}`
+    : "No cross-held portfolios";
+
+  if (!crossHeldRows.length) {
+    crossheldTableBody.innerHTML = `
+      <tr class="audit-empty-row">
+        <td colspan="3">No cross-held portfolios found.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  crossheldTableBody.innerHTML = crossHeldRows
+    .map(
+      (row) => `
+        <tr class="clickable-report-row" data-node-id="${escapeAttribute(row.firstNodeId)}">
+          <td class="audit-summary">
+            <strong>${escapeHtml(row.ticker)}</strong>
+            <span>${escapeHtml(row.name || "No name")}</span>
+          </td>
+          <td>${escapeHtml([...row.parents.values()].join(", "))}</td>
+          <td>${row.occurrences}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function walkNodeOccurrences(node, parent, callback) {
+  if (!node) return;
+  callback(node, parent);
+  for (const child of node.children || []) {
+    walkNodeOccurrences(child, node, callback);
+  }
+}
+
 function parentSelectOptions(selectedNodeId, parentId) {
   return flattenNodes(treeData)
     .filter((node) => node.id !== selectedNodeId && !isDescendant(selectedNodeId, node.id, treeData))
@@ -920,6 +1225,71 @@ function parentSelectOptions(selectedNodeId, parentId) {
       return `<option value="${escapeAttribute(node.id)}" ${selected}>${indent}L${node.depth || 1} - ${escapeHtml(node.ticker)}</option>`;
     })
     .join("");
+}
+
+function currencyOptionButtons(query = "") {
+  const normalizedQuery = query.trim().toUpperCase();
+  const matches = [...VALID_CURRENCIES]
+    .sort()
+    .filter((currency) => !normalizedQuery || currency.includes(normalizedQuery));
+
+  if (!matches.length) {
+    return '<div class="currency-empty">No matching currency</div>';
+  }
+
+  return matches
+    .map(
+      (currency) => `
+        <button type="button" class="currency-option" data-currency="${currency}" role="option">
+          ${currency}
+        </button>
+      `
+    )
+    .join("");
+}
+
+function showCurrencyOptions(input, options) {
+  if (!input || !options || input.disabled) return;
+  options.innerHTML = currencyOptionButtons(input.value);
+  options.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+}
+
+function hideCurrencyOptions(input, options) {
+  if (!input || !options) return;
+  options.hidden = true;
+  input.setAttribute("aria-expanded", "false");
+}
+
+function selectCurrencyOption(data, input, options, currency) {
+  if (!currency) return;
+  data.currency = currency;
+  input.value = currency;
+  hideCurrencyOptions(input, options);
+  commitCurrencyChange(data, input);
+}
+
+function commitCurrencyChange(data, input) {
+  data.currency = input.value.trim().toUpperCase();
+  input.value = data.currency;
+
+  if (data.currency && !VALID_CURRENCIES.has(data.currency)) {
+    showMessage("Select a valid 3-letter currency code from the list.");
+  } else {
+    clearMessage();
+  }
+
+  if (pendingFieldSnapshot) {
+    recordChange({
+      type: "Currency",
+      nodeId: data.id,
+      summary: `${data.ticker}: currency changed to ${data.currency || "blank"}`,
+      before: pendingFieldSnapshot,
+    });
+    pendingFieldSnapshot = null;
+  }
+  render();
+  selectNode(data);
 }
 
 function showTooltip(event, data) {
@@ -1050,6 +1420,60 @@ function focusNode(nodeId) {
     .translate(width / 2 - position.x * scale, height / 2 - position.y * scale)
     .scale(scale);
   svg.transition().duration(350).call(zoom.transform, transform);
+}
+
+function updateTreeScrollbarState() {
+  if (!treeScrollbar || !latestNodePositions.size) return;
+
+  const height = treeElement.clientHeight || 620;
+  const positions = [...latestNodePositions.values()].map((position) => position.y);
+  const minY = Math.min(...positions);
+  const maxY = Math.max(...positions);
+  const margin = 80;
+  const contentHeight = maxY - minY + margin * 2;
+  const disabled = contentHeight * currentTransform.k <= height;
+
+  verticalScrollState = {
+    minY,
+    maxY,
+    margin,
+    height,
+  };
+  treeScrollbar.disabled = disabled;
+  syncTreeScrollbar();
+}
+
+function syncTreeScrollbar() {
+  if (!treeScrollbar || !verticalScrollState || treeScrollbar.matches(":active")) return;
+
+  const { minY, maxY, margin, height } = verticalScrollState;
+  const topTranslate = margin - minY * currentTransform.k;
+  const bottomTranslate = height - margin - maxY * currentTransform.k;
+
+  if (bottomTranslate >= topTranslate) {
+    treeScrollbar.value = "50";
+    treeScrollbar.disabled = true;
+    return;
+  }
+
+  const percent = ((currentTransform.y - topTranslate) / (bottomTranslate - topTranslate)) * 100;
+  treeScrollbar.value = String(Math.max(0, Math.min(100, percent)));
+  treeScrollbar.disabled = false;
+}
+
+function handleTreeScrollbar(event) {
+  if (!verticalScrollState) return;
+
+  const { minY, maxY, margin, height } = verticalScrollState;
+  const topTranslate = margin - minY * currentTransform.k;
+  const bottomTranslate = height - margin - maxY * currentTransform.k;
+  const percent = Number(event.target.value) / 100;
+  const nextY = topTranslate + (bottomTranslate - topTranslate) * percent;
+  const transform = d3.zoomIdentity
+    .translate(currentTransform.x, nextY)
+    .scale(currentTransform.k);
+
+  svg.call(zoom.transform, transform);
 }
 
 function focusSelectedNode() {
