@@ -85,6 +85,8 @@
             <button type="button" id="expand-all" class="btn-secondary small">Expand all</button>
             <button type="button" id="collapse-all" class="btn-secondary small">Collapse all</button>
             <button type="button" id="focus-selected" class="btn-secondary small">Focus selected</button>
+            <button type="button" id="zoom-in" class="btn-secondary small" title="Zoom in (Ctrl + scroll)">Zoom in</button>
+            <button type="button" id="zoom-out" class="btn-secondary small" title="Zoom out (Ctrl + scroll)">Zoom out</button>
             <button type="button" id="reset-view" class="btn-secondary small">Reset view</button>
           </div>
         </div>
@@ -92,10 +94,11 @@
         <div id="qc-error-callout" class="qc-error-callout" hidden></div>
         <div class="tree-stage">
           <div id="tree" class="tree-canvas"></div>
-          <label class="tree-scroll-control" aria-label="Scroll portfolio tree vertically">
-            <span>Scroll</span>
-            <input id="tree-scrollbar" type="range" min="0" max="100" value="50" orient="vertical">
-          </label>
+          <div class="tree-scroll-control" aria-label="Scroll portfolio tree vertically">
+            <div id="tree-scroll-track" class="tree-scroll-track">
+              <div id="tree-scroll-thumb" class="tree-scroll-thumb"></div>
+            </div>
+          </div>
         </div>
       </section>
 
