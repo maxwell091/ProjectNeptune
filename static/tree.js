@@ -34,6 +34,7 @@ const qcFilterError = document.querySelector("#qc-filter-error");
 const qcFilterLevel = document.querySelector("#qc-filter-level");
 const crossheldCount = document.querySelector("#crossheld-count");
 const crossheldTableBody = document.querySelector("#crossheld-table-body");
+const crossheldAnalyzeButton = document.querySelector("#crossheld-analyze");
 const bulkPaste = document.querySelector("#bulk-paste");
 const bulkClearButton = document.querySelector("#bulk-clear");
 const bulkAddButton = document.querySelector("#bulk-add");
@@ -49,7 +50,7 @@ const sideTabs = document.querySelectorAll(".side-tab");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
 const ALLOWED_EXTENSIONS = [".csv", ".xlsx", ".xls", ".ods"];
-const MAX_PORTFOLIO_NAME_LENGTH = 10;
+const MAX_TICKER_LENGTH = 10;
 const MAX_TREE_DEPTH = 10;
 const VALID_CURRENCIES = new Set(
   "AED,AFN,ALL,AMD,ANG,AOA,ARS,AUD,AWG,AZN,BAM,BBD,BDT,BGN,BHD,BIF,BMD,BND,BOB,BRL,BSD,BTN,BWP,BYN,BZD,CAD,CDF,CHF,CLP,CNY,COP,CRC,CUP,CVE,CZK,DJF,DKK,DOP,DZD,EGP,ERN,ETB,EUR,FJD,FKP,GBP,GEL,GHS,GIP,GMD,GNF,GTQ,GYD,HKD,HNL,HTG,HUF,IDR,ILS,INR,IQD,IRR,ISK,JMD,JOD,JPY,KES,KGS,KHR,KID,KMF,KPW,KRW,KWD,KYD,KZT,LAK,LBP,LKR,LRD,LSL,LYD,MAD,MDL,MGA,MKD,MMK,MNT,MOP,MRU,MUR,MVR,MWK,MXN,MYR,MZN,NAD,NGN,NIO,NOK,NPR,NZD,OMR,PAB,PEN,PGK,PHP,PKR,PLN,PYG,QAR,RON,RSD,RUB,RWF,SAR,SBD,SCR,SDG,SEK,SGD,SHP,SLE,SOS,SRD,SSP,STN,SYP,SZL,THB,TJS,TMT,TND,TOP,TRY,TTD,TVD,TWD,TZS,UAH,UGX,USD,UYU,UZS,VES,VND,VUV,WST,XAF,XCD,XCG,XDR,XOF,XPF,YER,ZAR,ZMW,ZWL"
@@ -83,6 +84,8 @@ let changedNodeIds = new Set();
 let qcErrors = [];
 let qcErrorNodeIds = new Set();
 let crossHeldRows = [];
+let crossHeldNodeIds = new Set();
+let crossHeldActive = false;
 let editModeEnabled = false;
 let pendingFieldSnapshot = null;
 let dialogResolve = null;
@@ -152,6 +155,7 @@ crossheldTableBody?.addEventListener("click", (event) => {
   const row = event.target.closest("[data-node-id]");
   if (row) focusReportNode(row.dataset.nodeId);
 });
+crossheldAnalyzeButton?.addEventListener("click", analyzeCrossHeldPortfolios);
 bindTreeScrollControl();
 dialogCancelButton.addEventListener("click", () => closeConfirmDialog(false));
 dialogConfirmButton.addEventListener("click", () => closeConfirmDialog(true));
@@ -286,6 +290,8 @@ function applyDataset(payload) {
   qcErrors = [];
   qcErrorNodeIds = new Set();
   crossHeldRows = [];
+  crossHeldNodeIds = new Set();
+  crossHeldActive = false;
   bulkRows = [];
   bulkPaste.value = "";
   hideQcCallout();
@@ -460,6 +466,7 @@ function nodeClass(data) {
   if (data.id === selectedId) classes.push("selected");
   if (data.id === dropTargetId) classes.push("drop-target");
   if (qcErrorNodeIds.has(data.id)) classes.push("qc-error");
+  else if (crossHeldActive && crossHeldNodeIds.has(data.id)) classes.push("cross-held");
   if (changedNodeIds.has(data.id)) classes.push("changed");
   return classes.join(" ");
 }
@@ -1013,10 +1020,14 @@ function renderAudit() {
 function refreshReports() {
   qcErrors = buildQcErrors();
   qcErrorNodeIds = new Set(qcErrors.map((error) => error.nodeId));
-  crossHeldRows = buildCrossHeldRows();
   renderQcFilters();
   renderQcReport();
-  renderCrossHeldReport();
+  if (crossHeldActive) {
+    analyzeCrossHeldPortfolios(false);
+  } else {
+    renderCrossHeldReport();
+  }
+  refreshNodeClasses();
 }
 
 function buildQcErrors() {
@@ -1031,12 +1042,13 @@ function buildQcErrors() {
       addQcError(errors, node, "Invalid CCY", `Currency "${currency}" is not in the approved CCY list.`, currency, level);
     }
 
-    if ((node.name || "").length > MAX_PORTFOLIO_NAME_LENGTH) {
+    const ticker = (node.ticker || node.id || "").trim();
+    if (ticker.length > MAX_TICKER_LENGTH) {
       addQcError(
         errors,
         node,
-        "Portfolio Name Length",
-        `Portfolio name is longer than ${MAX_PORTFOLIO_NAME_LENGTH} characters.`,
+        "Ticker Length",
+        `Portfolio/Port Group Ticker "${ticker}" is longer than ${MAX_TICKER_LENGTH} characters.`,
         currency || "N/A",
         level
       );
@@ -1178,34 +1190,62 @@ function buildCrossHeldRows() {
       groups.set(key, {
         ticker: node.ticker || node.id,
         name: node.name || "",
-        firstNodeId: node.id,
+        nodeIds: [],
         parents: new Map(),
-        occurrences: 0,
       });
     }
 
     const group = groups.get(key);
-    const parentLabel = parent.ticker || parent.name || parent.id;
-    group.parents.set(parent.id, parentLabel);
-    group.occurrences += 1;
+    group.nodeIds.push(node.id);
+    group.parents.set(parent.id, parent.ticker || parent.name || parent.id);
   });
 
   return [...groups.values()]
-    .filter((group) => group.parents.size > 1 || group.occurrences > 1)
+    .filter((group) => group.parents.size > 1)
+    .map((group) => ({
+      ...group,
+      parentCount: group.parents.size,
+      occurrenceCount: group.nodeIds.length,
+      firstNodeId: group.nodeIds[0],
+    }))
     .sort((left, right) => left.ticker.localeCompare(right.ticker));
+}
+
+function analyzeCrossHeldPortfolios(focusFirst = true) {
+  crossHeldRows = buildCrossHeldRows();
+  crossHeldNodeIds = new Set(crossHeldRows.flatMap((row) => row.nodeIds));
+  crossHeldActive = true;
+  renderCrossHeldReport();
+  render();
+  refreshNodeClasses();
+
+  if (focusFirst && crossHeldRows.length) {
+    activateTab("crossheld");
+    focusReportNode(crossHeldRows[0].firstNodeId);
+  }
 }
 
 function renderCrossHeldReport() {
   if (!crossheldCount || !crossheldTableBody) return;
 
+  if (!crossHeldActive) {
+    crossheldCount.textContent = "Click Analyze to search for duplicates";
+    crossheldTableBody.innerHTML = `
+      <tr class="audit-empty-row">
+        <td colspan="3">Run the analyzer to find the same portfolio ticker held under multiple portgroups.</td>
+      </tr>
+    `;
+    return;
+  }
+
   crossheldCount.textContent = crossHeldRows.length
-    ? `${crossHeldRows.length} cross-held portfolio${crossHeldRows.length === 1 ? "" : "s"}`
-    : "No cross-held portfolios";
+    ? `${crossHeldRows.length} duplicate portfolio${crossHeldRows.length === 1 ? "" : "s"} across ${crossHeldRows.reduce((sum, row) => sum + row.parentCount, 0)} portgroups`
+    : "No duplicate portfolios found";
 
   if (!crossHeldRows.length) {
     crossheldTableBody.innerHTML = `
       <tr class="audit-empty-row">
-        <td colspan="3">No cross-held portfolios found.</td>
+        <td colspan="3">No duplicate portfolio tickers were found across the tree.</td>
       </tr>
     `;
     return;
@@ -1220,7 +1260,7 @@ function renderCrossHeldReport() {
             <span>${escapeHtml(row.name || "No name")}</span>
           </td>
           <td>${escapeHtml([...row.parents.values()].join(", "))}</td>
-          <td>${row.occurrences}</td>
+          <td>In ${row.parentCount} portgroup${row.parentCount === 1 ? "" : "s"}</td>
         </tr>
       `
     )

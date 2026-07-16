@@ -65,6 +65,7 @@
             <span class="legend-pill branch-pill"><i class="dot branch"></i> Branch</span>
             <span class="legend-pill leaf-pill"><i class="dot leaf"></i> Portfolio</span>
             <span class="legend-pill error-pill"><i class="dot error"></i> QC Error</span>
+            <span class="legend-pill crossheld-pill"><i class="dot crossheld"></i> Duplicate</span>
           </div>
         </div>
         <div class="tree-nav" aria-label="Tree navigation controls">
@@ -219,21 +220,22 @@
               <div class="audit-header">
                 <div>
                   <h3>Cross-held Analyzer</h3>
-                  <p id="crossheld-count">No cross-held portfolios</p>
+                  <p id="crossheld-count">Click Analyze to search for duplicates</p>
                 </div>
+                <button type="button" id="crossheld-analyze" class="btn-primary small">Analyze duplicates</button>
               </div>
               <div class="audit-table-wrap report-table-wrap">
                 <table class="audit-table report-table" aria-label="Cross-held portfolios">
                   <thead>
                     <tr>
                       <th scope="col">Portfolio</th>
-                      <th scope="col">Parents</th>
-                      <th scope="col">Occurrences</th>
+                      <th scope="col">Held under</th>
+                      <th scope="col">Portgroups</th>
                     </tr>
                   </thead>
                   <tbody id="crossheld-table-body">
                     <tr class="audit-empty-row">
-                      <td colspan="3">No cross-held portfolios found.</td>
+                      <td colspan="3">Run the analyzer to find the same portfolio ticker held under multiple portgroups.</td>
                     </tr>
                   </tbody>
                 </table>
