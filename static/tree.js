@@ -46,6 +46,11 @@ const dialogMessage = document.querySelector("#dialog-message");
 const dialogDetails = document.querySelector("#dialog-details");
 const dialogCancelButton = document.querySelector("#dialog-cancel");
 const dialogConfirmButton = document.querySelector("#dialog-confirm");
+const generateOutputButton = document.querySelector("#generate-output");
+const outputDialog = document.querySelector("#output-dialog");
+const outputTimezoneSelect = document.querySelector("#output-timezone");
+const outputCancelButton = document.querySelector("#output-cancel");
+const outputConfirmButton = document.querySelector("#output-confirm");
 const sideTabs = document.querySelectorAll(".side-tab");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
@@ -56,6 +61,29 @@ const VALID_CURRENCIES = new Set(
   "AED,AFN,ALL,AMD,ANG,AOA,ARS,AUD,AWG,AZN,BAM,BBD,BDT,BGN,BHD,BIF,BMD,BND,BOB,BRL,BSD,BTN,BWP,BYN,BZD,CAD,CDF,CHF,CLP,CNY,COP,CRC,CUP,CVE,CZK,DJF,DKK,DOP,DZD,EGP,ERN,ETB,EUR,FJD,FKP,GBP,GEL,GHS,GIP,GMD,GNF,GTQ,GYD,HKD,HNL,HTG,HUF,IDR,ILS,INR,IQD,IRR,ISK,JMD,JOD,JPY,KES,KGS,KHR,KID,KMF,KPW,KRW,KWD,KYD,KZT,LAK,LBP,LKR,LRD,LSL,LYD,MAD,MDL,MGA,MKD,MMK,MNT,MOP,MRU,MUR,MVR,MWK,MXN,MYR,MZN,NAD,NGN,NIO,NOK,NPR,NZD,OMR,PAB,PEN,PGK,PHP,PKR,PLN,PYG,QAR,RON,RSD,RUB,RWF,SAR,SBD,SCR,SDG,SEK,SGD,SHP,SLE,SOS,SRD,SSP,STN,SYP,SZL,THB,TJS,TMT,TND,TOP,TRY,TTD,TVD,TWD,TZS,UAH,UGX,USD,UYU,UZS,VES,VND,VUV,WST,XAF,XCD,XCG,XDR,XOF,XPF,YER,ZAR,ZMW,ZWL"
     .split(",")
 );
+const OUTPUT_HEADERS = [
+  "parent",
+  "portfolio_code",
+  "portfolio_name",
+  "full_name",
+  "portfolio_type",
+  "pos_table",
+  "nav_subtotal",
+  "currency",
+  "group",
+  "benchmark",
+  "extern_entity",
+  "extern_entity_type",
+  "extern_acct",
+  "operating_timezone",
+  "duration_type",
+  "legal_s",
+  "portfolio_manager",
+  "asst_portfolio_manager",
+  "portfolio_perms",
+  "importance",
+  "comment",
+];
 const PORTFOLIO_FILE_TYPES = [
   {
     description: "Portfolio files",
@@ -157,6 +185,12 @@ crossheldTableBody?.addEventListener("click", (event) => {
 });
 crossheldAnalyzeButton?.addEventListener("click", analyzeCrossHeldPortfolios);
 bindTreeScrollControl();
+generateOutputButton?.addEventListener("click", openOutputDialog);
+outputCancelButton?.addEventListener("click", closeOutputDialog);
+outputConfirmButton?.addEventListener("click", downloadGeneratedOutput);
+outputDialog?.addEventListener("click", (event) => {
+  if (event.target === outputDialog) closeOutputDialog();
+});
 dialogCancelButton.addEventListener("click", () => closeConfirmDialog(false));
 dialogConfirmButton.addEventListener("click", () => closeConfirmDialog(true));
 confirmDialog.addEventListener("click", (event) => {
@@ -165,6 +199,9 @@ confirmDialog.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !confirmDialog.hidden) {
     closeConfirmDialog(false);
+  }
+  if (event.key === "Escape" && outputDialog && !outputDialog.hidden) {
+    closeOutputDialog();
   }
 });
 expandSelectedButton.addEventListener("click", () => {
@@ -769,6 +806,114 @@ function closeConfirmDialog(result) {
     dialogResolve(result);
     dialogResolve = null;
   }
+}
+
+function openOutputDialog() {
+  if (!treeData) {
+    showMessage("Load a portfolio tree before generating output.");
+    return;
+  }
+  if (outputDialog) outputDialog.hidden = false;
+  outputTimezoneSelect?.focus();
+}
+
+function closeOutputDialog() {
+  if (outputDialog) outputDialog.hidden = true;
+}
+
+function downloadGeneratedOutput() {
+  if (!treeData) return;
+
+  const timezone = outputTimezoneSelect?.value || "EU/Berlin";
+  const rows = buildOutputRows(timezone);
+  const csv = rowsToCsv(rows);
+  const stamp = new Date();
+  const filename = `output_file_${String(stamp.getDate()).padStart(2, "0")}${String(stamp.getMonth() + 1).padStart(2, "0")}${String(stamp.getFullYear()).slice(-2)}.csv`;
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+
+  closeOutputDialog();
+  clearMessage();
+  showMessage(`Downloaded ${filename} with ${rows.length} portfolio row${rows.length === 1 ? "" : "s"}.`);
+}
+
+function buildOutputRows(operatingTimezone) {
+  const rows = [];
+  const roots = outputRootNodes(treeData);
+  for (const node of roots) {
+    appendOutputRow(node, "", operatingTimezone, rows);
+  }
+  return rows;
+}
+
+function outputRootNodes(root) {
+  if (isVirtualRootNode(root)) {
+    return root.children || [];
+  }
+  return [root];
+}
+
+function isVirtualRootNode(node) {
+  return node.id === "portfolio-root" || node.ticker === "Portfolio";
+}
+
+function appendOutputRow(node, parentTicker, operatingTimezone, rows) {
+  const portfolioName = formatOutputTicker(node.ticker || node.id);
+  const parent = parentTicker ? formatOutputTicker(parentTicker) : "";
+
+  rows.push({
+    parent,
+    portfolio_code: "",
+    portfolio_name: portfolioName,
+    full_name: node.name || node.ticker || "",
+    portfolio_type: "ANALYTICAL",
+    pos_table: "pos",
+    nav_subtotal: "M",
+    currency: node.currency || "",
+    group: hasChildren(node) ? "TRUE" : "FALSE",
+    benchmark: "",
+    extern_entity: "",
+    extern_entity_type: "",
+    extern_acct: "",
+    operating_timezone: operatingTimezone,
+    duration_type: "",
+    legal_s: "",
+    portfolio_manager: "",
+    asst_portfolio_manager: "",
+    portfolio_perms: "",
+    importance: "",
+    comment: "",
+  });
+
+  for (const child of node.children || []) {
+    appendOutputRow(child, node.ticker || node.id, operatingTimezone, rows);
+  }
+}
+
+function formatOutputTicker(ticker) {
+  return String(ticker || "").replaceAll("-", "_");
+}
+
+function rowsToCsv(rows) {
+  const lines = [OUTPUT_HEADERS.join(",")];
+  for (const row of rows) {
+    lines.push(OUTPUT_HEADERS.map((header) => csvCell(row[header])).join(","));
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+  return text;
 }
 
 function handleBulkPaste() {

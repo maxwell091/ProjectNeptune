@@ -50,6 +50,12 @@
           </svg>
           Upload
         </button>
+        <button type="button" id="generate-output" class="btn-secondary">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M10 3v10M6 12l4 4 4-4M4 4h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Generate Output
+        </button>
       </form>
     </header>
 
@@ -289,6 +295,29 @@
         <div class="dialog-actions">
           <button type="button" id="dialog-cancel" class="btn-secondary">Cancel</button>
           <button type="button" id="dialog-confirm" class="btn-warning">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="output-dialog" class="dialog-overlay" hidden>
+      <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="output-dialog-title">
+        <div class="dialog-icon warning" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3v12M8 11l4 4 4-4M5 19h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h2 id="output-dialog-title">Generate Output File</h2>
+        <p>Select the operating timezone for the exported portfolio file.</p>
+        <label class="dialog-field">
+          <span>Operating timezone</span>
+          <select id="output-timezone">
+            <option value="EU/Berlin">EU/Berlin</option>
+            <option value="US/Central">US/Central</option>
+          </select>
+        </label>
+        <div class="dialog-actions">
+          <button type="button" id="output-cancel" class="btn-secondary">Cancel</button>
+          <button type="button" id="output-confirm" class="btn-primary">Download CSV</button>
         </div>
       </div>
     </div>
