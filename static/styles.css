@@ -1576,6 +1576,10 @@ button:disabled:hover {
   margin-top: 22px;
 }
 
+.dialog-actions-split {
+  flex-wrap: wrap;
+}
+
 .btn-danger {
   color: #fff;
   background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);

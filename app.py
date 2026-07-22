@@ -7,12 +7,14 @@ Run with:
 from __future__ import annotations
 
 import argparse
+import io
 import os
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
+from portfolio_exporter import export_output_rows
 from portfolio_loader import PortfolioLoadError, load_portfolio, load_portfolio_upload
 
 
@@ -61,6 +63,32 @@ def upload():
 
     _set_active_dataset(loaded)
     return jsonify(active_dataset)
+
+
+@app.post("/api/generate-output")
+def generate_output():
+    payload = request.get_json(silent=True) or {}
+    rows = payload.get("rows")
+    fmt = (payload.get("format") or "csv").lower()
+
+    if not isinstance(rows, list) or not rows:
+        return jsonify({"error": "No portfolio rows were provided for export."}), 400
+
+    try:
+        content, mime_type = export_output_rows(rows, fmt)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Could not generate output file: {exc}"}), 500
+
+    buffer = io.BytesIO(content)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        mimetype=mime_type,
+        as_attachment=True,
+        download_name=f"output_file.{fmt}",
+    )
 
 
 def _set_active_dataset(loaded) -> None:

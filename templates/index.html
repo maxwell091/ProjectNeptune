@@ -299,6 +299,24 @@
       </div>
     </div>
 
+    <div id="duplicate-dialog" class="dialog-overlay" hidden>
+      <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="duplicate-dialog-title">
+        <div class="dialog-icon warning" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h2 id="duplicate-dialog-title">Portfolio Already Exists</h2>
+        <p id="duplicate-dialog-message"></p>
+        <ul id="duplicate-dialog-details" class="dialog-details"></ul>
+        <div class="dialog-actions dialog-actions-split">
+          <button type="button" id="duplicate-cancel" class="btn-secondary">Cancel</button>
+          <button type="button" id="duplicate-copy" class="btn-secondary">Copy</button>
+          <button type="button" id="duplicate-move" class="btn-warning">Move</button>
+        </div>
+      </div>
+    </div>
+
     <div id="output-dialog" class="dialog-overlay" hidden>
       <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="output-dialog-title">
         <div class="dialog-icon warning" aria-hidden="true">
@@ -307,7 +325,16 @@
           </svg>
         </div>
         <h2 id="output-dialog-title">Generate Output File</h2>
-        <p>Select the operating timezone for the exported portfolio file.</p>
+        <p>Select the output format and operating timezone for the exported portfolio file.</p>
+        <label class="dialog-field">
+          <span>Output format</span>
+          <select id="output-format">
+            <option value="csv">CSV (.csv)</option>
+            <option value="txt">Text tab-delimited (.txt)</option>
+            <option value="xlsx">Excel (.xlsx)</option>
+            <option value="ods">OpenDocument (.ods)</option>
+          </select>
+        </label>
         <label class="dialog-field">
           <span>Operating timezone</span>
           <select id="output-timezone">
@@ -317,7 +344,7 @@
         </label>
         <div class="dialog-actions">
           <button type="button" id="output-cancel" class="btn-secondary">Cancel</button>
-          <button type="button" id="output-confirm" class="btn-primary">Download CSV</button>
+          <button type="button" id="output-confirm" class="btn-primary">Download output</button>
         </div>
       </div>
     </div>

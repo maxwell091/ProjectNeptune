@@ -48,9 +48,16 @@ const dialogCancelButton = document.querySelector("#dialog-cancel");
 const dialogConfirmButton = document.querySelector("#dialog-confirm");
 const generateOutputButton = document.querySelector("#generate-output");
 const outputDialog = document.querySelector("#output-dialog");
+const outputFormatSelect = document.querySelector("#output-format");
 const outputTimezoneSelect = document.querySelector("#output-timezone");
 const outputCancelButton = document.querySelector("#output-cancel");
 const outputConfirmButton = document.querySelector("#output-confirm");
+const duplicateDialog = document.querySelector("#duplicate-dialog");
+const duplicateDialogMessage = document.querySelector("#duplicate-dialog-message");
+const duplicateDialogDetails = document.querySelector("#duplicate-dialog-details");
+const duplicateCancelButton = document.querySelector("#duplicate-cancel");
+const duplicateCopyButton = document.querySelector("#duplicate-copy");
+const duplicateMoveButton = document.querySelector("#duplicate-move");
 const sideTabs = document.querySelectorAll(".side-tab");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
@@ -117,6 +124,7 @@ let crossHeldActive = false;
 let editModeEnabled = false;
 let pendingFieldSnapshot = null;
 let dialogResolve = null;
+let duplicateDialogResolve = null;
 let bulkRows = [];
 let currentTransform = d3.zoomIdentity;
 let verticalScrollState = null;
@@ -191,6 +199,12 @@ outputConfirmButton?.addEventListener("click", downloadGeneratedOutput);
 outputDialog?.addEventListener("click", (event) => {
   if (event.target === outputDialog) closeOutputDialog();
 });
+duplicateCancelButton?.addEventListener("click", () => closeDuplicateDialog(null));
+duplicateCopyButton?.addEventListener("click", () => closeDuplicateDialog("copy"));
+duplicateMoveButton?.addEventListener("click", () => closeDuplicateDialog("move"));
+duplicateDialog?.addEventListener("click", (event) => {
+  if (event.target === duplicateDialog) closeDuplicateDialog(null);
+});
 dialogCancelButton.addEventListener("click", () => closeConfirmDialog(false));
 dialogConfirmButton.addEventListener("click", () => closeConfirmDialog(true));
 confirmDialog.addEventListener("click", (event) => {
@@ -202,6 +216,9 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape" && outputDialog && !outputDialog.hidden) {
     closeOutputDialog();
+  }
+  if (event.key === "Escape" && duplicateDialog && !duplicateDialog.hidden) {
+    closeDuplicateDialog(null);
   }
 });
 expandSelectedButton.addEventListener("click", () => {
@@ -821,26 +838,62 @@ function closeOutputDialog() {
   if (outputDialog) outputDialog.hidden = true;
 }
 
-function downloadGeneratedOutput() {
-  if (!treeData) return;
-
-  const timezone = outputTimezoneSelect?.value || "EU/Berlin";
-  const rows = buildOutputRows(timezone);
-  const csv = rowsToCsv(rows);
+function outputFilenameStamp() {
   const stamp = new Date();
-  const filename = `output_file_${String(stamp.getDate()).padStart(2, "0")}${String(stamp.getMonth() + 1).padStart(2, "0")}${String(stamp.getFullYear()).slice(-2)}.csv`;
+  return `${String(stamp.getDate()).padStart(2, "0")}${String(stamp.getMonth() + 1).padStart(2, "0")}${String(stamp.getFullYear()).slice(-2)}`;
+}
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
 
-  closeOutputDialog();
-  clearMessage();
-  showMessage(`Downloaded ${filename} with ${rows.length} portfolio row${rows.length === 1 ? "" : "s"}.`);
+async function downloadGeneratedOutput() {
+  if (!treeData) return;
+
+  const timezone = outputTimezoneSelect?.value || "EU/Berlin";
+  const format = outputFormatSelect?.value || "csv";
+  const rows = buildOutputRows(timezone);
+  const filename = `output_file_${outputFilenameStamp()}.${format}`;
+
+  try {
+    if (format === "csv") {
+      const csv = rowsToCsv(rows);
+      downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8;" }), filename);
+    } else if (format === "txt") {
+      const txt = rowsToTxt(rows);
+      downloadBlob(new Blob([txt], { type: "text/plain;charset=utf-8;" }), filename);
+    } else {
+      const response = await fetch("/api/generate-output", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows, format }),
+      });
+      if (!response.ok) {
+        let errorMessage = "Could not generate output file.";
+        try {
+          const errorPayload = await response.json();
+          errorMessage = errorPayload.error || errorMessage;
+        } catch {
+          // Keep default message when the response is not JSON.
+        }
+        throw new Error(errorMessage);
+      }
+      downloadBlob(await response.blob(), filename);
+    }
+
+    closeOutputDialog();
+    clearMessage();
+    showMessage(
+      `Downloaded ${filename} (${format.toUpperCase()}) with ${rows.length} portfolio row${rows.length === 1 ? "" : "s"}.`
+    );
+  } catch (error) {
+    showMessage(error.message);
+  }
 }
 
 function buildOutputRows(operatingTimezone) {
@@ -903,17 +956,30 @@ function formatOutputTicker(ticker) {
 function rowsToCsv(rows) {
   const lines = [OUTPUT_HEADERS.join(",")];
   for (const row of rows) {
-    lines.push(OUTPUT_HEADERS.map((header) => csvCell(row[header])).join(","));
+    lines.push(OUTPUT_HEADERS.map((header) => delimitedCell(row[header], ",")).join(","));
   }
   return `${lines.join("\r\n")}\r\n`;
 }
 
-function csvCell(value) {
+function rowsToTxt(rows) {
+  const lines = [OUTPUT_HEADERS.join("\t")];
+  for (const row of rows) {
+    lines.push(OUTPUT_HEADERS.map((header) => delimitedCell(row[header], "\t")).join("\t"));
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+function delimitedCell(value, delimiter) {
   const text = String(value ?? "");
-  if (/[",\r\n]/.test(text)) {
+  const pattern = delimiter === "\t" ? /[\t"\r\n]/ : /[",\r\n]/;
+  if (pattern.test(text)) {
     return `"${text.replaceAll('"', '""')}"`;
   }
   return text;
+}
+
+function csvCell(value) {
+  return delimitedCell(value, ",");
 }
 
 function handleBulkPaste() {
@@ -1022,11 +1088,45 @@ function addBulkPortfolios() {
   const validRows = bulkRows.filter((row) => row.valid);
   if (!validRows.length) return;
 
+  processBulkPortfolioRows(validRows);
+}
+
+async function processBulkPortfolioRows(validRows) {
   const before = cloneTree(treeData);
-  const addedTickers = [];
+  const summaries = [];
+  const touchedTickers = [];
 
   for (const row of validRows) {
-    const ticker = uniqueTickerFromName(row.name);
+    const existing = findExistingPortfolioForAdd(row.name);
+    const targetParent = row.parent;
+
+    if (existing) {
+      const currentParentId = findParentId(existing.id, treeData);
+      if (currentParentId === targetParent.id) {
+        summaries.push(`${existing.ticker} is already under ${targetParent.ticker}`);
+        continue;
+      }
+
+      const action = await openDuplicatePortfolioDialog(existing, targetParent);
+      if (action === "move") {
+        if (moveNode(existing.id, targetParent.id)) {
+          summaries.push(`Moved ${existing.ticker} to ${targetParent.ticker}`);
+          touchedTickers.push(existing.ticker);
+        } else {
+          summaries.push(`Could not move ${existing.ticker} to ${targetParent.ticker}`);
+        }
+      } else if (action === "copy") {
+        if (copyNodeToParent(existing.id, targetParent.id)) {
+          summaries.push(`Copied ${existing.ticker} to ${targetParent.ticker}`);
+          touchedTickers.push(existing.ticker);
+        } else {
+          summaries.push(`Could not copy ${existing.ticker} to ${targetParent.ticker}`);
+        }
+      }
+      continue;
+    }
+
+    const ticker = tickerFromName(row.name);
     const node = {
       id: ticker,
       ticker,
@@ -1039,44 +1139,148 @@ function addBulkPortfolios() {
       childCount: 0,
       children: [],
     };
-    row.parent.children = row.parent.children || [];
-    row.parent.children.push(node);
-    row.parent._collapsed = false;
-    addedTickers.push(ticker);
+    targetParent.children = targetParent.children || [];
+    targetParent.children.push(node);
+    targetParent._collapsed = false;
+    summaries.push(`Added ${ticker} under ${targetParent.ticker}`);
+    touchedTickers.push(ticker);
   }
+
+  if (!summaries.length) return;
 
   updateNodeTypes(treeData);
   updatePaths(treeData, []);
   updateDepths(treeData, 1);
   recordChange({
     type: "Add",
-    nodeId: addedTickers.join(", "),
-    summary: `Added ${addedTickers.length} portfolio${addedTickers.length === 1 ? "" : "s"}: ${addedTickers.join(", ")}`,
+    nodeId: touchedTickers.join(", "),
+    summary: summaries.join("; "),
     before,
   });
   render();
-  const firstAdded = findNode(addedTickers[0], treeData);
-  if (firstAdded) {
-    selectNode(firstAdded);
-    focusNode(firstAdded.id);
+  const firstTicker = touchedTickers[0];
+  const firstNode =
+    findNodesByTicker(firstTicker)[0] || findNode(firstTicker, treeData);
+  if (firstNode) {
+    selectNode(firstNode);
+    focusNode(firstNode.id);
   }
   clearBulkRows();
 }
 
-function uniqueTickerFromName(name) {
-  const base =
+function openDuplicatePortfolioDialog(existingNode, targetParent) {
+  const childCount = flattenNodes(existingNode).length - 1;
+  const details = [
+    `Portfolio: ${existingNode.ticker}`,
+    `Full name: ${existingNode.name || "—"}`,
+    `Move to: ${targetParent.ticker}`,
+  ];
+  if (childCount > 0) {
+    details.push(`Includes ${childCount} child node${childCount === 1 ? "" : "s"} (entire group will be moved or copied)`);
+  }
+  details.push("Move removes it from the current location. Copy keeps the original and adds another instance.");
+
+  return new Promise((resolve) => {
+    duplicateDialogResolve = resolve;
+    duplicateDialogMessage.textContent = `${existingNode.ticker} already exists in the tree. Would you like to move it or copy it to ${targetParent.ticker}?`;
+    duplicateDialogDetails.hidden = false;
+    duplicateDialogDetails.innerHTML = details
+      .map((item) => `<li>${escapeHtml(item)}</li>`)
+      .join("");
+    duplicateDialog.hidden = false;
+    duplicateMoveButton.focus();
+  });
+}
+
+function closeDuplicateDialog(result) {
+  if (duplicateDialog.hidden) return;
+  duplicateDialog.hidden = true;
+  if (duplicateDialogResolve) {
+    duplicateDialogResolve(result);
+    duplicateDialogResolve = null;
+  }
+}
+
+function findExistingPortfolioForAdd(name) {
+  const ticker = tickerFromName(name);
+  const byTicker = findNodesByTicker(ticker);
+  if (byTicker.length) return byTicker[0];
+
+  const normalizedName = name.trim().toLowerCase();
+  if (!normalizedName) return null;
+  return (
+    flattenNodes(treeData).find(
+      (node) => (node.name || "").trim().toLowerCase() === normalizedName
+    ) || null
+  );
+}
+
+function findNodesByTicker(ticker) {
+  const key = String(ticker || "")
+    .trim()
+    .toUpperCase();
+  if (!key) return [];
+  return flattenNodes(treeData).filter(
+    (node) => (node.ticker || node.id || "").trim().toUpperCase() === key
+  );
+}
+
+function tickerFromName(name) {
+  return (
     name
       .toUpperCase()
       .replace(/[^A-Z0-9]+/g, "")
-      .slice(0, 12) || "PORTFOLIO";
-  let ticker = base;
+      .slice(0, 12) || "PORTFOLIO"
+  );
+}
+
+function uniqueNodeId(baseTicker) {
+  const base = String(baseTicker || "PORTFOLIO")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "")
+    .slice(0, 12) || "PORTFOLIO";
+  let candidate = base;
   let index = 1;
-  while (findNode(ticker, treeData)) {
-    ticker = `${base.slice(0, 10)}${String(index).padStart(2, "0")}`;
+  while (findNode(candidate, treeData)) {
+    candidate = `${base.slice(0, 10)}__${index}`;
     index += 1;
   }
-  return ticker;
+  return candidate;
 }
+
+function cloneNodeWithNewIds(node) {
+  const clone = cloneTree(node);
+  reassignNodeIds(clone);
+  return clone;
+}
+
+function reassignNodeIds(node) {
+  node.id = uniqueNodeId(node.ticker || node.id);
+  for (const child of node.children || []) {
+    reassignNodeIds(child);
+  }
+}
+
+function copyNodeToParent(sourceId, targetId) {
+  if (sourceId === targetId || isDescendant(sourceId, targetId, treeData)) {
+    return false;
+  }
+
+  const source = findNode(sourceId, treeData);
+  const target = findNode(targetId, treeData);
+  if (!source || !target) return false;
+
+  const clone = cloneNodeWithNewIds(source);
+  target.children = target.children || [];
+  target.children.push(clone);
+  target._collapsed = false;
+
+  updateNodeTypes(treeData);
+  updatePaths(treeData, []);
+  updateDepths(treeData, 1);
+  return true;
+}
+
 
 function restoreTreeSnapshot(snapshot, preferredSelectedId) {
   treeData = cloneTree(snapshot);
@@ -1574,7 +1778,25 @@ function setCollapsedState(node, collapsed) {
 
 function collapseBelowRoot(node) {
   if (!node) return;
-  node._collapsed = false;
+
+  if (isVirtualRootNode(node)) {
+    node._collapsed = false;
+    for (const child of node.children || []) {
+      collapseNodeHideChildren(child);
+    }
+    return;
+  }
+
+  collapseNodeHideChildren(node);
+}
+
+function collapseNodeHideChildren(node) {
+  if (!node) return;
+  if (hasChildren(node)) {
+    node._collapsed = true;
+  } else {
+    delete node._collapsed;
+  }
   for (const child of node.children || []) {
     setCollapsedState(child, true);
   }
