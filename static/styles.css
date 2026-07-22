@@ -515,6 +515,9 @@ button:disabled:hover {
 .message {
   display: none;
   flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   margin: 12px 24px 0 28px;
   padding: 12px 14px;
   border-radius: var(--radius-sm);
@@ -523,10 +526,43 @@ button:disabled:hover {
   color: #9a3412;
   font-size: 13px;
   font-weight: 700;
+  line-height: 1.45;
 }
 
 .message.visible {
+  display: flex;
+}
+
+#message-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.message-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: #9a3412;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+.message-close svg {
+  width: 12px;
+  height: 12px;
   display: block;
+}
+
+.message-close:hover {
+  background: #fff;
+  transform: none;
 }
 
 .qc-error-callout {
@@ -578,8 +614,10 @@ button:disabled:hover {
   position: absolute;
   top: 8px;
   right: 8px;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -587,6 +625,12 @@ button:disabled:hover {
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid #fecaca;
   border-radius: 999px;
+}
+
+.qc-callout-close svg {
+  width: 12px;
+  height: 12px;
+  display: block;
 }
 
 .details-header {

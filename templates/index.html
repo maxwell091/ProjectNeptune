@@ -97,7 +97,14 @@
             <button type="button" id="reset-view" class="btn-secondary small">Reset view</button>
           </div>
         </div>
-        <div id="message" class="message" role="status"></div>
+        <div id="message" class="message" role="status">
+          <span id="message-text"></span>
+          <button type="button" id="message-close" class="message-close" aria-label="Close notification">
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
         <div id="qc-error-callout" class="qc-error-callout" hidden></div>
         <div class="tree-stage">
           <div id="tree" class="tree-canvas"></div>

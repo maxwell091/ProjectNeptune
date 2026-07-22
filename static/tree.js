@@ -2,6 +2,8 @@ const treeElement = document.querySelector("#tree");
 const detailsElement = document.querySelector("#details");
 const tooltip = document.querySelector("#tooltip");
 const message = document.querySelector("#message");
+const messageText = document.querySelector("#message-text");
+const messageCloseButton = document.querySelector("#message-close");
 const qcErrorCallout = document.querySelector("#qc-error-callout");
 const uploadForm = document.querySelector("#upload-form");
 const fileInput = document.querySelector("#file-input");
@@ -194,6 +196,7 @@ crossheldTableBody?.addEventListener("click", (event) => {
 crossheldAnalyzeButton?.addEventListener("click", analyzeCrossHeldPortfolios);
 bindTreeScrollControl();
 generateOutputButton?.addEventListener("click", openOutputDialog);
+messageCloseButton?.addEventListener("click", clearMessage);
 outputCancelButton?.addEventListener("click", closeOutputDialog);
 outputConfirmButton?.addEventListener("click", downloadGeneratedOutput);
 outputDialog?.addEventListener("click", (event) => {
@@ -1513,7 +1516,11 @@ function showQcCallout(error) {
   if (!qcErrorCallout) return;
 
   qcErrorCallout.innerHTML = `
-    <button type="button" class="qc-callout-close" aria-label="Close QC error">&times;</button>
+    <button type="button" class="qc-callout-close" aria-label="Close QC error">
+      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </button>
     <strong>QC Error #${escapeHtml(error.number)}: ${escapeHtml(error.type)}</strong>
     <span>${escapeHtml(error.ticker)} · Level ${escapeHtml(error.level)} · CCY ${escapeHtml(error.currency || "N/A")}</span>
     <p>${escapeHtml(error.message)}</p>
@@ -2230,12 +2237,12 @@ function hasChildren(data) {
 }
 
 function showMessage(text) {
-  message.textContent = text;
+  if (messageText) messageText.textContent = text;
   message.classList.add("visible");
 }
 
 function clearMessage() {
-  message.textContent = "";
+  if (messageText) messageText.textContent = "";
   message.classList.remove("visible");
 }
 
