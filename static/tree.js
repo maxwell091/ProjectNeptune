@@ -27,7 +27,10 @@ const zoomOutButton = document.querySelector("#zoom-out");
 const resetViewButton = document.querySelector("#reset-view");
 const treeScrollTrack = document.querySelector("#tree-scroll-track");
 const treeScrollThumb = document.querySelector("#tree-scroll-thumb");
-const treeScrollControl = document.querySelector(".tree-scroll-control");
+const treeScrollControl = document.querySelector(".tree-scroll-control.vertical");
+const treeScrollTrackH = document.querySelector("#tree-scroll-track-h");
+const treeScrollThumbH = document.querySelector("#tree-scroll-thumb-h");
+const treeScrollControlH = document.querySelector(".tree-scroll-control.horizontal");
 const auditCount = document.querySelector("#audit-count");
 const auditTableBody = document.querySelector("#audit-table-body");
 const qcCount = document.querySelector("#qc-count");
@@ -130,8 +133,9 @@ let duplicateDialogResolve = null;
 let bulkRows = [];
 let currentTransform = d3.zoomIdentity;
 let verticalScrollState = null;
+let horizontalScrollState = null;
 let treeScrollDragging = false;
-let treeScrollDragOffset = 0;
+let treeScrollDraggingH = false;
 
 const DRAG_CLICK_DISTANCE = 8;
 const LEVEL_GAP = 230;
@@ -161,6 +165,11 @@ const zoom = d3
 svg.call(zoom);
 svg.on("wheel.treepan", (event) => {
   if (event.ctrlKey || event.metaKey) return;
+  if (event.shiftKey && horizontalScrollState?.canScroll) {
+    event.preventDefault();
+    panTreeHorizontally(-event.deltaY);
+    return;
+  }
   if (!verticalScrollState?.canScroll) return;
   event.preventDefault();
   panTreeVertically(-event.deltaY);
@@ -1897,53 +1906,159 @@ function panTreeVertically(deltaY) {
   svg.call(zoom.transform, transform);
 }
 
+function getHorizontalScrollMetrics() {
+  if (!horizontalScrollState) return null;
+
+  const { minX, maxX, margin, width } = horizontalScrollState;
+  const scale = currentTransform.k;
+  const leftTranslate = margin - minX * scale;
+  const rightTranslate = width - margin - maxX * scale;
+  const canScroll = rightTranslate < leftTranslate;
+
+  return {
+    leftTranslate,
+    rightTranslate,
+    canScroll,
+    scrollSpan: leftTranslate - rightTranslate,
+  };
+}
+
+function applyHorizontalScrollPercent(percent) {
+  const metrics = getHorizontalScrollMetrics();
+  if (!metrics?.canScroll) return;
+
+  const clamped = Math.max(0, Math.min(100, percent));
+  const nextX =
+    metrics.leftTranslate + (metrics.rightTranslate - metrics.leftTranslate) * (clamped / 100);
+  const transform = d3.zoomIdentity.translate(nextX, currentTransform.y).scale(currentTransform.k);
+  svg.call(zoom.transform, transform);
+}
+
+function panTreeHorizontally(deltaX) {
+  const metrics = getHorizontalScrollMetrics();
+  if (!metrics?.canScroll) return;
+
+  const nextX = Math.max(
+    metrics.rightTranslate,
+    Math.min(metrics.leftTranslate, currentTransform.x + deltaX)
+  );
+  if (nextX === currentTransform.x) return;
+
+  const transform = d3.zoomIdentity.translate(nextX, currentTransform.y).scale(currentTransform.k);
+  svg.call(zoom.transform, transform);
+}
+
 function bindTreeScrollControl() {
-  if (!treeScrollTrack || !treeScrollThumb) return;
-
-  treeScrollThumb.addEventListener("pointerdown", (event) => {
-    if (!verticalScrollState?.canScroll) return;
-    treeScrollDragging = true;
-    treeScrollDragOffset = event.clientY - treeScrollThumb.offsetTop;
-    treeScrollThumb.setPointerCapture(event.pointerId);
-    event.preventDefault();
+  bindAxisScrollControl({
+    track: treeScrollTrack,
+    thumb: treeScrollThumb,
+    axis: "y",
+    getMetrics: getVerticalScrollMetrics,
+    setDragging: (value) => {
+      treeScrollDragging = value;
+    },
+    applyPercent: applyVerticalScrollPercent,
   });
 
-  treeScrollThumb.addEventListener("pointermove", (event) => {
-    if (!treeScrollDragging || !verticalScrollState?.canScroll) return;
-    const trackHeight = treeScrollTrack.clientHeight;
-    const thumbHeight = treeScrollThumb.clientHeight;
-    const maxThumbTop = Math.max(trackHeight - thumbHeight, 0);
-    const nextTop = Math.max(0, Math.min(maxThumbTop, event.clientY - treeScrollTrack.getBoundingClientRect().top - treeScrollDragOffset));
-    const percent = maxThumbTop > 0 ? (nextTop / maxThumbTop) * 100 : 0;
-    applyVerticalScrollPercent(percent);
+  bindAxisScrollControl({
+    track: treeScrollTrackH,
+    thumb: treeScrollThumbH,
+    axis: "x",
+    getMetrics: getHorizontalScrollMetrics,
+    setDragging: (value) => {
+      treeScrollDraggingH = value;
+    },
+    applyPercent: applyHorizontalScrollPercent,
   });
+}
 
-  const stopTreeScrollDrag = () => {
-    treeScrollDragging = false;
+function bindAxisScrollControl({ track, thumb, axis, getMetrics, setDragging, applyPercent }) {
+  if (!track || !thumb) return;
+
+  const isY = axis === "y";
+  const clientProp = isY ? "clientY" : "clientX";
+  const sizeProp = isY ? "clientHeight" : "clientWidth";
+  const edgeProp = isY ? "top" : "left";
+  const styleEdgeProp = isY ? "top" : "left";
+
+  let dragOffset = 0;
+  let dragging = false;
+  let captureTarget = thumb;
+
+  const canScroll = () => Boolean(getMetrics()?.canScroll);
+
+  const trackSize = () => track[sizeProp];
+  const thumbSize = () => thumb[sizeProp];
+
+  const setThumbEdge = (edge) => {
+    thumb.style[styleEdgeProp] = `${edge}px`;
   };
 
-  treeScrollThumb.addEventListener("pointerup", stopTreeScrollDrag);
-  treeScrollThumb.addEventListener("pointercancel", stopTreeScrollDrag);
+  const pointerToPercent = (clientCoord) => {
+    const maxThumbEdge = Math.max(trackSize() - thumbSize(), 0);
+    if (maxThumbEdge <= 0) return 0;
+    const trackEdge = track.getBoundingClientRect()[edgeProp];
+    const nextEdge = Math.max(0, Math.min(maxThumbEdge, clientCoord - trackEdge - dragOffset));
+    setThumbEdge(nextEdge);
+    return (nextEdge / maxThumbEdge) * 100;
+  };
 
-  treeScrollTrack.addEventListener("pointerdown", (event) => {
-    if (!verticalScrollState?.canScroll || event.target === treeScrollThumb) return;
-    const trackRect = treeScrollTrack.getBoundingClientRect();
-    const thumbHeight = treeScrollThumb.clientHeight;
-    const maxThumbTop = Math.max(treeScrollTrack.clientHeight - thumbHeight, 0);
-    const clickTop = event.clientY - trackRect.top - thumbHeight / 2;
-    const nextTop = Math.max(0, Math.min(maxThumbTop, clickTop));
-    const percent = maxThumbTop > 0 ? (nextTop / maxThumbTop) * 100 : 0;
-    applyVerticalScrollPercent(percent);
+  const onPointerMove = (event) => {
+    if (!dragging || !canScroll()) return;
+    event.preventDefault();
+    applyPercent(pointerToPercent(event[clientProp]));
+  };
+
+  const stopDrag = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    setDragging(false);
+    if (event?.pointerId != null && captureTarget.hasPointerCapture?.(event.pointerId)) {
+      captureTarget.releasePointerCapture(event.pointerId);
+    }
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", stopDrag);
+    window.removeEventListener("pointercancel", stopDrag);
+  };
+
+  const startDrag = (event, offset, target = thumb) => {
+    if (!canScroll()) return;
+    dragging = true;
+    setDragging(true);
+    dragOffset = offset;
+    captureTarget = target;
+    captureTarget.setPointerCapture(event.pointerId);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopDrag);
+    window.addEventListener("pointercancel", stopDrag);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  thumb.addEventListener("pointerdown", (event) => {
+    startDrag(event, event[clientProp] - thumb.getBoundingClientRect()[edgeProp], thumb);
+  });
+
+  track.addEventListener("pointerdown", (event) => {
+    if (event.target === thumb) return;
+    if (!canScroll()) return;
+    applyPercent(pointerToPercent(event[clientProp]));
+    startDrag(event, thumbSize() / 2, track);
   });
 }
 
 function updateTreeScrollbarState() {
-  if (!treeScrollTrack || !latestNodePositions.size) return;
+  if ((!treeScrollTrack && !treeScrollTrackH) || !latestNodePositions.size) return;
 
   const height = treeElement.clientHeight || 620;
-  const positions = [...latestNodePositions.values()].map((position) => position.y);
-  const minY = Math.min(...positions);
-  const maxY = Math.max(...positions);
+  const width = treeElement.clientWidth || 960;
+  const positionsList = [...latestNodePositions.values()];
+  const positionsY = positionsList.map((position) => position.y);
+  const positionsX = positionsList.map((position) => position.x);
+  const minY = Math.min(...positionsY);
+  const maxY = Math.max(...positionsY);
+  const minX = Math.min(...positionsX);
+  const maxX = Math.max(...positionsX);
   const margin = 80;
 
   verticalScrollState = {
@@ -1953,36 +2068,77 @@ function updateTreeScrollbarState() {
     height,
     canScroll: false,
   };
+  horizontalScrollState = {
+    minX,
+    maxX,
+    margin,
+    width,
+    canScroll: false,
+  };
 
-  const metrics = getVerticalScrollMetrics();
-  verticalScrollState.canScroll = Boolean(metrics?.canScroll);
+  verticalScrollState.canScroll = Boolean(getVerticalScrollMetrics()?.canScroll);
+  horizontalScrollState.canScroll = Boolean(getHorizontalScrollMetrics()?.canScroll);
   treeScrollControl?.classList.toggle("disabled", !verticalScrollState.canScroll);
+  treeScrollControlH?.classList.toggle("disabled", !horizontalScrollState.canScroll);
   syncTreeScrollbar();
 }
 
 function syncTreeScrollbar() {
-  if (!treeScrollTrack || !treeScrollThumb || !verticalScrollState || treeScrollDragging) return;
-
-  const metrics = getVerticalScrollMetrics();
-  if (!metrics?.canScroll) {
-    treeScrollThumb.style.height = "100%";
-    treeScrollThumb.style.top = "0";
-    return;
+  if (verticalScrollState) {
+    const verticalMetrics = getVerticalScrollMetrics();
+    verticalScrollState.canScroll = Boolean(verticalMetrics?.canScroll);
+    treeScrollControl?.classList.toggle("disabled", !verticalScrollState.canScroll);
   }
 
-  const trackHeight = treeScrollTrack.clientHeight;
-  const contentHeight =
-    (verticalScrollState.maxY - verticalScrollState.minY) * currentTransform.k +
-    verticalScrollState.margin * 2;
-  const thumbHeight = Math.max(36, trackHeight * (verticalScrollState.height / contentHeight));
-  const maxThumbTop = Math.max(trackHeight - thumbHeight, 0);
-  const percent =
-    ((currentTransform.y - metrics.topTranslate) / (metrics.bottomTranslate - metrics.topTranslate)) * 100;
-  const clamped = Math.max(0, Math.min(100, percent));
-  const thumbTop = maxThumbTop * (clamped / 100);
+  if (horizontalScrollState) {
+    const horizontalMetrics = getHorizontalScrollMetrics();
+    horizontalScrollState.canScroll = Boolean(horizontalMetrics?.canScroll);
+    treeScrollControlH?.classList.toggle("disabled", !horizontalScrollState.canScroll);
+  }
 
-  treeScrollThumb.style.height = `${thumbHeight}px`;
-  treeScrollThumb.style.top = `${thumbTop}px`;
+  if (treeScrollTrack && treeScrollThumb && verticalScrollState && !treeScrollDragging) {
+    const metrics = getVerticalScrollMetrics();
+    if (!metrics?.canScroll) {
+      treeScrollThumb.style.height = "100%";
+      treeScrollThumb.style.top = "0";
+    } else {
+      const trackHeight = treeScrollTrack.clientHeight;
+      const contentHeight =
+        (verticalScrollState.maxY - verticalScrollState.minY) * currentTransform.k +
+        verticalScrollState.margin * 2;
+      const thumbHeight = Math.max(36, trackHeight * (verticalScrollState.height / contentHeight));
+      const maxThumbTop = Math.max(trackHeight - thumbHeight, 0);
+      const percent =
+        ((currentTransform.y - metrics.topTranslate) / (metrics.bottomTranslate - metrics.topTranslate)) * 100;
+      const clamped = Math.max(0, Math.min(100, percent));
+      const thumbTop = maxThumbTop * (clamped / 100);
+
+      treeScrollThumb.style.height = `${thumbHeight}px`;
+      treeScrollThumb.style.top = `${thumbTop}px`;
+    }
+  }
+
+  if (treeScrollTrackH && treeScrollThumbH && horizontalScrollState && !treeScrollDraggingH) {
+    const metrics = getHorizontalScrollMetrics();
+    if (!metrics?.canScroll) {
+      treeScrollThumbH.style.width = "100%";
+      treeScrollThumbH.style.left = "0";
+    } else {
+      const trackWidth = treeScrollTrackH.clientWidth;
+      const contentWidth =
+        (horizontalScrollState.maxX - horizontalScrollState.minX) * currentTransform.k +
+        horizontalScrollState.margin * 2;
+      const thumbWidth = Math.max(36, trackWidth * (horizontalScrollState.width / contentWidth));
+      const maxThumbLeft = Math.max(trackWidth - thumbWidth, 0);
+      const percent =
+        ((currentTransform.x - metrics.leftTranslate) / (metrics.rightTranslate - metrics.leftTranslate)) * 100;
+      const clamped = Math.max(0, Math.min(100, percent));
+      const thumbLeft = maxThumbLeft * (clamped / 100);
+
+      treeScrollThumbH.style.width = `${thumbWidth}px`;
+      treeScrollThumbH.style.left = `${thumbLeft}px`;
+    }
+  }
 }
 
 function focusSelectedNode() {

@@ -465,19 +465,33 @@ button:disabled:hover {
 
 .tree-scroll-control {
   position: absolute;
-  top: 18px;
-  right: 16px;
-  bottom: 18px;
   z-index: 4;
   display: flex;
-  align-items: stretch;
-  width: 34px;
-  padding: 8px 6px;
-  background: rgba(255, 255, 255, 0.92);
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.96);
   border: 1px solid var(--border);
   border-radius: 999px;
   box-shadow: var(--shadow-sm);
   user-select: none;
+  pointer-events: auto;
+}
+
+.tree-scroll-control.vertical {
+  top: 18px;
+  right: 16px;
+  bottom: 44px;
+  width: 20px;
+  padding: 12px 5px;
+}
+
+.tree-scroll-control.horizontal {
+  left: 16px;
+  right: 44px;
+  bottom: 16px;
+  height: 20px;
+  padding: 5px 12px;
 }
 
 .tree-scroll-control.disabled {
@@ -488,28 +502,57 @@ button:disabled:hover {
 .tree-scroll-track {
   position: relative;
   flex: 1;
-  width: 10px;
-  min-height: 120px;
-  background: #eef2ff;
+  height: 100%;
+  box-sizing: border-box;
   border-radius: 999px;
   cursor: pointer;
+  background: var(--primary-soft);
+}
+
+.tree-scroll-control.vertical .tree-scroll-track {
+  width: 10px;
+  min-height: 120px;
+}
+
+.tree-scroll-control.horizontal .tree-scroll-track {
+  height: 10px;
+  min-width: 120px;
 }
 
 .tree-scroll-thumb {
   position: absolute;
-  left: 0;
-  width: 100%;
-  min-height: 36px;
-  background: linear-gradient(180deg, var(--primary), #6366f1);
-  border: 2px solid #eef2ff;
+  box-sizing: border-box;
+  border: 0;
   border-radius: 999px;
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.28);
+  background: linear-gradient(135deg, var(--primary) 0%, #6366f1 100%);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
   cursor: grab;
   touch-action: none;
 }
 
+.tree-scroll-control.vertical .tree-scroll-thumb {
+  left: 0;
+  width: 10px;
+  min-height: 36px;
+}
+
+.tree-scroll-control.horizontal .tree-scroll-thumb {
+  top: 0;
+  height: 10px;
+  min-width: 36px;
+}
+
+.tree-scroll-thumb:hover {
+  background: linear-gradient(135deg, #4338ca 0%, #4f46e5 100%);
+}
+
 .tree-scroll-thumb:active {
   cursor: grabbing;
+  box-shadow:
+    0 1px 1px rgba(15, 23, 42, 0.16),
+    inset 0 1px 2px rgba(15, 23, 42, 0.12);
 }
 
 .message {
