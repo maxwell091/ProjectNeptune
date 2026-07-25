@@ -116,6 +116,7 @@ let draggingId = null;
 let selectedFile = null;
 let dragMoved = false;
 let latestNodePositions = new Map();
+let layoutTranslate = { x: 80, y: 60 };
 let originalTreeSnapshot = null;
 let undoStack = [];
 let redoStack = [];
@@ -165,15 +166,28 @@ const zoom = d3
 svg.call(zoom);
 svg.on("wheel.treepan", (event) => {
   if (event.ctrlKey || event.metaKey) return;
-  if (event.shiftKey && horizontalScrollState?.canScroll) {
+
+  const hMetrics = getHorizontalScrollMetrics();
+  const vMetrics = getVerticalScrollMetrics();
+  const horizontalWheel =
+    (Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.shiftKey) && hMetrics?.canScroll;
+
+  if (horizontalWheel) {
     event.preventDefault();
-    panTreeHorizontally(-event.deltaY);
+    panTreeHorizontally(-(Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY));
     return;
   }
-  if (!verticalScrollState?.canScroll) return;
+
+  if (!vMetrics?.canScroll) return;
   event.preventDefault();
   panTreeVertically(-event.deltaY);
 });
+
+if (typeof ResizeObserver !== "undefined") {
+  new ResizeObserver(() => {
+    if (treeData) updateTreeScrollbarState();
+  }).observe(treeElement);
+}
 
 fetchTree();
 
@@ -397,13 +411,13 @@ function render() {
   const maxX = d3.max(descendants, (node) => node.x) ?? 0;
   const startX = Math.max(60, (height - (maxX - minX)) / 2 - minX);
   const startY = 80;
+  layoutTranslate = { x: startY, y: startX };
   latestNodePositions = new Map(
     descendants.map((node) => [
       node.data.id,
       { x: node.y + startY, y: node.x + startX, node },
     ])
   );
-  updateTreeScrollbarState();
 
   const layer = viewport
     .append("g")
@@ -525,6 +539,42 @@ function render() {
     .attr("dy", "1.95em")
     .attr("text-anchor", "middle")
     .text((d) => `L${d.data.depth || d.depth + 1}`);
+
+  queueScrollStateUpdate();
+}
+
+function queueScrollStateUpdate() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => updateTreeScrollbarState());
+  });
+}
+
+function measureScrollContentBounds() {
+  const layer = viewport.select(":scope > g").node();
+  const padX = 28;
+  const padY = 28;
+
+  if (layer) {
+    const bbox = layer.getBBox();
+    return {
+      minX: layoutTranslate.x + bbox.x - padX,
+      maxX: layoutTranslate.x + bbox.x + bbox.width + padX,
+      minY: layoutTranslate.y + bbox.y - padY,
+      maxY: layoutTranslate.y + bbox.y + bbox.height + padY,
+    };
+  }
+
+  if (!latestNodePositions.size) return null;
+
+  const positions = [...latestNodePositions.values()];
+  const xs = positions.map((position) => position.x);
+  const ys = positions.map((position) => position.y);
+  return {
+    minX: Math.min(...xs) - padX,
+    maxX: Math.max(...xs) + padX,
+    minY: Math.min(...ys) - padY,
+    maxY: Math.max(...ys) + padY,
+  };
 }
 
 function nodeClass(data) {
@@ -2050,16 +2100,13 @@ function bindAxisScrollControl({ track, thumb, axis, getMetrics, setDragging, ap
 function updateTreeScrollbarState() {
   if ((!treeScrollTrack && !treeScrollTrackH) || !latestNodePositions.size) return;
 
+  const bounds = measureScrollContentBounds();
+  if (!bounds) return;
+
   const height = treeElement.clientHeight || 620;
   const width = treeElement.clientWidth || 960;
-  const positionsList = [...latestNodePositions.values()];
-  const positionsY = positionsList.map((position) => position.y);
-  const positionsX = positionsList.map((position) => position.x);
-  const minY = Math.min(...positionsY);
-  const maxY = Math.max(...positionsY);
-  const minX = Math.min(...positionsX);
-  const maxX = Math.max(...positionsX);
   const margin = 80;
+  const { minX, maxX, minY, maxY } = bounds;
 
   verticalScrollState = {
     minY,
