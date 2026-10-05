@@ -44,12 +44,52 @@ MIME_TYPES = {
 def export_output_rows(rows: list[dict[str, Any]], fmt: str) -> tuple[bytes, str]:
     """Return file bytes and MIME type for the requested output format."""
 
+    return _export_rows(rows, fmt, OUTPUT_HEADERS)
+
+
+def export_hierarchy_rows(
+    rows: list[dict[str, Any]], headers: list[str], fmt: str
+) -> tuple[bytes, str]:
+    """Export rows back to the original Level 1 / Level 2 / ... input shape."""
+
+    return _export_rows(rows, fmt, headers)
+
+
+def export_hierarchy_workbook(
+    sheets: dict[str, list[dict[str, Any]]], headers: list[str], fmt: str
+) -> tuple[bytes, str]:
+    """Export hierarchy rows split into one sheet per tree level.
+
+    Mirrors the client's original workbook layout, where each ``Level_N``
+    sheet holds the rows for that depth but shares the same columns.
+    """
+
+    normalized = (fmt or "xlsx").lower()
+    if normalized not in {"xlsx", "ods"}:
+        raise ValueError("A multi-sheet hierarchy export requires xlsx or ods.")
+    if not sheets:
+        raise ValueError("No rows were provided for the hierarchy export.")
+
+    engine = "openpyxl" if normalized == "xlsx" else "odf"
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine=engine) as writer:
+        for sheet_name, rows in sheets.items():
+            frame = pd.DataFrame(rows).reindex(columns=headers, fill_value="")
+            frame.to_excel(writer, index=False, sheet_name=str(sheet_name)[:31] or "Sheet1")
+
+    buffer.seek(0)
+    return buffer.read(), MIME_TYPES[normalized]
+
+
+def _export_rows(
+    rows: list[dict[str, Any]], fmt: str, headers: list[str]
+) -> tuple[bytes, str]:
     normalized = (fmt or "csv").lower()
     if normalized not in SUPPORTED_OUTPUT_FORMATS:
         raise ValueError("Output format must be csv, txt, xlsx, or ods.")
 
     frame = pd.DataFrame(rows)
-    frame = frame.reindex(columns=OUTPUT_HEADERS, fill_value="")
+    frame = frame.reindex(columns=headers, fill_value="")
 
     buffer = io.BytesIO()
     if normalized == "csv":

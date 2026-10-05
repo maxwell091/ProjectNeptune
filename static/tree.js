@@ -25,6 +25,10 @@ const focusSelectedButton = document.querySelector("#focus-selected");
 const zoomInButton = document.querySelector("#zoom-in");
 const zoomOutButton = document.querySelector("#zoom-out");
 const resetViewButton = document.querySelector("#reset-view");
+const viewGraphButton = document.querySelector("#view-graph");
+const viewOutlineButton = document.querySelector("#view-outline");
+const outlineView = document.querySelector("#outline-view");
+const outlineBody = document.querySelector("#outline-body");
 const treeScrollTrack = document.querySelector("#tree-scroll-track");
 const treeScrollThumb = document.querySelector("#tree-scroll-thumb");
 const treeScrollControl = document.querySelector(".tree-scroll-control.vertical");
@@ -40,6 +44,7 @@ const qcFilterLevel = document.querySelector("#qc-filter-level");
 const crossheldCount = document.querySelector("#crossheld-count");
 const crossheldTableBody = document.querySelector("#crossheld-table-body");
 const crossheldAnalyzeButton = document.querySelector("#crossheld-analyze");
+const bulkTarget = document.querySelector("#bulk-target");
 const bulkPaste = document.querySelector("#bulk-paste");
 const bulkClearButton = document.querySelector("#bulk-clear");
 const bulkAddButton = document.querySelector("#bulk-add");
@@ -52,11 +57,22 @@ const dialogDetails = document.querySelector("#dialog-details");
 const dialogCancelButton = document.querySelector("#dialog-cancel");
 const dialogConfirmButton = document.querySelector("#dialog-confirm");
 const generateOutputButton = document.querySelector("#generate-output");
+const exportHierarchyButton = document.querySelector("#export-hierarchy");
 const outputDialog = document.querySelector("#output-dialog");
+const outputDialogTitle = document.querySelector("#output-dialog-title");
+const outputDialogDescription = document.querySelector("#output-dialog-description");
+const outputTimezoneField = document.querySelector("#output-timezone-field");
 const outputFormatSelect = document.querySelector("#output-format");
 const outputTimezoneSelect = document.querySelector("#output-timezone");
+const outputChangesOnlyCheckbox = document.querySelector("#output-changes-only");
 const outputCancelButton = document.querySelector("#output-cancel");
 const outputConfirmButton = document.querySelector("#output-confirm");
+const qcBadge = document.querySelector("#qc-badge");
+const auditExportButton = document.querySelector("#audit-export");
+const importReportDialog = document.querySelector("#import-report-dialog");
+const importReportMessage = document.querySelector("#import-report-message");
+const importReportDetails = document.querySelector("#import-report-details");
+const importReportOkButton = document.querySelector("#import-report-ok");
 const duplicateDialog = document.querySelector("#duplicate-dialog");
 const duplicateDialogMessage = document.querySelector("#duplicate-dialog-message");
 const duplicateDialogDetails = document.querySelector("#duplicate-dialog-details");
@@ -137,6 +153,9 @@ let verticalScrollState = null;
 let horizontalScrollState = null;
 let treeScrollDragging = false;
 let treeScrollDraggingH = false;
+let levelColumns = [];
+let outputDialogMode = "output";
+let treeViewMode = "graph";
 
 const DRAG_CLICK_DISTANCE = 8;
 const LEVEL_GAP = 230;
@@ -217,13 +236,33 @@ crossheldTableBody?.addEventListener("click", (event) => {
   if (row) focusReportNode(row.dataset.nodeId);
 });
 crossheldAnalyzeButton?.addEventListener("click", analyzeCrossHeldPortfolios);
+viewGraphButton?.addEventListener("click", () => setTreeViewMode("graph"));
+viewOutlineButton?.addEventListener("click", () => setTreeViewMode("outline"));
+outlineBody?.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-node-id]");
+  if (!row) return;
+
+  const node = findNode(row.dataset.nodeId, treeData);
+  if (!node) return;
+
+  if (event.target.closest("[data-outline-toggle]")) {
+    node._collapsed = !node._collapsed;
+  }
+  selectNode(node);
+});
 bindTreeScrollControl();
-generateOutputButton?.addEventListener("click", openOutputDialog);
+generateOutputButton?.addEventListener("click", () => openOutputDialog("output"));
+exportHierarchyButton?.addEventListener("click", () => openOutputDialog("hierarchy"));
 messageCloseButton?.addEventListener("click", clearMessage);
 outputCancelButton?.addEventListener("click", closeOutputDialog);
-outputConfirmButton?.addEventListener("click", downloadGeneratedOutput);
+outputConfirmButton?.addEventListener("click", confirmOutputDialog);
 outputDialog?.addEventListener("click", (event) => {
   if (event.target === outputDialog) closeOutputDialog();
+});
+auditExportButton?.addEventListener("click", exportAuditLogCsv);
+importReportOkButton?.addEventListener("click", closeImportReportDialog);
+importReportDialog?.addEventListener("click", (event) => {
+  if (event.target === importReportDialog) closeImportReportDialog();
 });
 duplicateCancelButton?.addEventListener("click", () => closeDuplicateDialog(null));
 duplicateCopyButton?.addEventListener("click", () => closeDuplicateDialog("copy"));
@@ -245,6 +284,9 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape" && duplicateDialog && !duplicateDialog.hidden) {
     closeDuplicateDialog(null);
+  }
+  if (event.key === "Escape" && importReportDialog && !importReportDialog.hidden) {
+    closeImportReportDialog();
   }
 });
 expandSelectedButton.addEventListener("click", () => {
@@ -357,6 +399,7 @@ function isAllowedFile(filename) {
 function applyDataset(payload) {
   clearMessage();
   treeData = payload.tree;
+  levelColumns = payload.levelColumns || [];
   selectedId = null;
   dropTargetId = null;
   updateNodeTypes(treeData);
@@ -379,6 +422,7 @@ function applyDataset(payload) {
   updateEditModeUi();
   renderAudit();
   renderBulkPreview();
+  updateBulkTargetUI();
   refreshReports();
 
   datasetName.textContent = payload.sourceName || "Loaded portfolio";
@@ -386,13 +430,104 @@ function applyDataset(payload) {
     payload.levelColumns?.length || 0
   } level columns`;
 
+  showImportReport(payload);
   render();
   updateSearchCount();
   selectNode(treeData);
 }
 
+function setTreeViewMode(mode) {
+  treeViewMode = mode === "outline" ? "outline" : "graph";
+  const outline = treeViewMode === "outline";
+
+  viewGraphButton?.classList.toggle("active", !outline);
+  viewOutlineButton?.classList.toggle("active", outline);
+  viewGraphButton?.setAttribute("aria-pressed", String(!outline));
+  viewOutlineButton?.setAttribute("aria-pressed", String(outline));
+
+  treeElement.style.display = outline ? "none" : "";
+  if (treeScrollControl) treeScrollControl.style.display = outline ? "none" : "";
+  if (treeScrollControlH) treeScrollControlH.style.display = outline ? "none" : "";
+  if (outlineView) outlineView.hidden = !outline;
+  zoomInButton.disabled = outline;
+  zoomOutButton.disabled = outline;
+
+  render();
+  if (selectedId) focusNode(selectedId);
+}
+
+function renderOutlineView() {
+  if (!outlineBody || !treeData) return;
+
+  const rows = visibleOutlineRows();
+  if (!rows.length) {
+    outlineBody.innerHTML = '<tr class="outline-empty-row"><td colspan="6">No portfolios to display.</td></tr>';
+    return;
+  }
+
+  outlineBody.innerHTML = rows.map(outlineRowHtml).join("");
+}
+
+function visibleOutlineRows() {
+  const rows = [];
+
+  function walk(node, level, parentTicker) {
+    rows.push({ node, level, parentTicker });
+    if (node._collapsed) return;
+    for (const child of node.children || []) {
+      walk(child, level + 1, node.ticker || node.id);
+    }
+  }
+
+  for (const root of outputRootNodes(treeData)) {
+    walk(root, 1, "");
+  }
+  return rows;
+}
+
+function outlineRowHtml({ node, level, parentTicker }) {
+  const branch = hasChildren(node);
+  const collapsed = Boolean(node._collapsed);
+  const levelClass = `level-${Math.min(level, 6)}`;
+  const classes = ["outline-row", branch ? "branch" : "leaf"];
+
+  if (node.id === selectedId) classes.push("selected");
+  if (qcErrorNodeIds.has(node.id)) classes.push("qc-error");
+  else if (crossHeldActive && crossHeldNodeIds.has(node.id)) classes.push("cross-held");
+  if (changedNodeIds.has(node.id)) classes.push("changed");
+
+  const ticker = node.ticker || node.id;
+  const marker = branch
+    ? `<button type="button" class="outline-toggle" data-outline-toggle aria-label="${
+        collapsed ? "Expand" : "Collapse"
+      } ${escapeAttribute(ticker)}">${collapsed ? "+" : "−"}</button>`
+    : '<span class="outline-bullet" aria-hidden="true"></span>';
+
+  return `
+    <tr class="${classes.join(" ")}" data-node-id="${escapeAttribute(node.id)}">
+      <td class="outline-level"><span class="level-tag ${levelClass}">${level}</span></td>
+      <td class="outline-tree">
+        <span class="outline-tree-inner">
+          <span class="outline-indent" style="width:${(level - 1) * 20}px"></span>
+          ${marker}
+          <span class="outline-ticker ${levelClass}">${escapeHtml(ticker)}</span>
+        </span>
+      </td>
+      <td class="outline-cell">${escapeHtml(ticker)}</td>
+      <td class="outline-cell outline-name">${escapeHtml(node.name || "")}</td>
+      <td class="outline-cell">${escapeHtml(node.currency || "")}</td>
+      <td class="outline-cell outline-parent">${escapeHtml(parentTicker || "—")}</td>
+    </tr>
+  `;
+}
+
 function render() {
   if (!treeData) return;
+
+  if (treeViewMode === "outline") {
+    renderOutlineView();
+    return;
+  }
 
   const width = treeElement.clientWidth || 900;
   const height = treeElement.clientHeight || 620;
@@ -649,9 +784,14 @@ function selectNode(data) {
       </div>
 
       ${
-        editModeEnabled && data.id !== treeData.id
+        editModeEnabled
           ? `<div class="editor-actions">
-        <button type="button" id="delete-portfolio" class="btn-danger small">Delete portfolio</button>
+        <button type="button" id="add-here" class="btn-secondary small">Add portfolio here</button>
+        ${
+          data.id !== treeData.id
+            ? '<button type="button" id="delete-portfolio" class="btn-danger small">Delete portfolio</button>'
+            : ""
+        }
       </div>`
           : ""
       }
@@ -659,10 +799,15 @@ function selectNode(data) {
   `;
   bindEditor(data);
   updateSelectedActionButtons(data);
+  updateBulkTargetUI();
   refreshNodeClasses();
 }
 
 function refreshNodeClasses() {
+  if (treeViewMode === "outline") {
+    renderOutlineView();
+    return;
+  }
   viewport.selectAll(".node").attr("class", (d) => nodeClass(d.data));
 }
 
@@ -744,6 +889,10 @@ function bindEditor(data) {
 
   document.querySelector("#delete-portfolio")?.addEventListener("click", () => {
     deleteSelectedPortfolio(data);
+  });
+  document.querySelector("#add-here")?.addEventListener("click", () => {
+    activateTab("add");
+    bulkPaste?.focus();
   });
 }
 
@@ -887,17 +1036,114 @@ function closeConfirmDialog(result) {
   }
 }
 
-function openOutputDialog() {
+function updateQcBadge() {
+  if (!qcBadge) return;
+  if (!treeData) {
+    qcBadge.hidden = true;
+    return;
+  }
+  qcBadge.hidden = false;
+  if (qcErrors.length) {
+    qcBadge.textContent = `${qcErrors.length} QC error${qcErrors.length === 1 ? "" : "s"}`;
+    qcBadge.className = "qc-badge qc-badge-errors";
+  } else {
+    qcBadge.textContent = "QC clean";
+    qcBadge.className = "qc-badge qc-badge-clean";
+  }
+}
+
+function showImportReport(payload) {
+  if (!importReportDialog) return;
+
+  const rowsLoaded = payload.rowsLoaded ?? payload.rowCount ?? 0;
+  const rowsSkipped = payload.rowsSkipped ?? 0;
+  const warnings = payload.warnings || [];
+
+  if (!rowsSkipped && !warnings.length) {
+    showMessage(
+      `Loaded ${rowsLoaded} row${rowsLoaded === 1 ? "" : "s"}. No import warnings — QC ran automatically.`
+    );
+    return;
+  }
+
+  importReportMessage.textContent = `Loaded ${rowsLoaded} row${rowsLoaded === 1 ? "" : "s"}${
+    rowsSkipped ? `, skipped ${rowsSkipped} row${rowsSkipped === 1 ? "" : "s"}` : ""
+  }. QC ran automatically — check the QC Report tab for results.`;
+
+  if (warnings.length) {
+    importReportDetails.hidden = false;
+    importReportDetails.innerHTML = warnings.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  } else {
+    importReportDetails.hidden = true;
+    importReportDetails.innerHTML = "";
+  }
+
+  importReportDialog.hidden = false;
+}
+
+function closeImportReportDialog() {
+  if (importReportDialog) importReportDialog.hidden = true;
+}
+
+function openOutputDialog(mode) {
   if (!treeData) {
     showMessage("Load a portfolio tree before generating output.");
     return;
   }
+
+  outputDialogMode = mode === "hierarchy" ? "hierarchy" : "output";
+
+  if (outputDialogMode === "hierarchy") {
+    outputDialogTitle.textContent = "Export Hierarchy File";
+    outputDialogDescription.textContent =
+      "Save the current tree back to the original Level 1 / Level 2 / … hierarchy format so it can be re-imported or shared as the source workbook.";
+    if (outputTimezoneField) outputTimezoneField.style.display = "none";
+    outputConfirmButton.textContent = "Download hierarchy";
+  } else {
+    outputDialogTitle.textContent = "Generate Output File";
+    outputDialogDescription.textContent =
+      "Select the output format and operating timezone for the exported portfolio file.";
+    if (outputTimezoneField) outputTimezoneField.style.display = "";
+    outputConfirmButton.textContent = "Download output";
+  }
+
+  if (outputChangesOnlyCheckbox) {
+    outputChangesOnlyCheckbox.disabled = !changedNodeIds.size;
+    outputChangesOnlyCheckbox.checked = false;
+  }
+
   if (outputDialog) outputDialog.hidden = false;
   outputTimezoneSelect?.focus();
 }
 
 function closeOutputDialog() {
   if (outputDialog) outputDialog.hidden = true;
+}
+
+async function confirmOutputDialog() {
+  const mode = outputDialogMode;
+
+  if (qcErrors.length) {
+    closeOutputDialog();
+    const exportAnyway = await openConfirmDialog({
+      title: "QC Errors Found",
+      message: `${qcErrors.length} QC error${qcErrors.length === 1 ? "" : "s"} are present in the current tree.`,
+      details: [
+        "Exporting now will include the invalid rows as-is",
+        "Fix first: review the QC Report tab, then reopen this export",
+      ],
+      confirmText: "Export anyway",
+      cancelText: "Fix first",
+      variant: "danger",
+    });
+    if (!exportAnyway) return;
+  }
+
+  if (mode === "hierarchy") {
+    await downloadHierarchyExport();
+  } else {
+    await downloadGeneratedOutput();
+  }
 }
 
 function outputFilenameStamp() {
@@ -919,8 +1165,17 @@ async function downloadGeneratedOutput() {
 
   const timezone = outputTimezoneSelect?.value || "EU/Berlin";
   const format = outputFormatSelect?.value || "csv";
-  const rows = buildOutputRows(timezone);
+  const changesOnly = Boolean(outputChangesOnlyCheckbox?.checked);
+  let rows = buildOutputRows(timezone);
+  if (changesOnly) {
+    rows = rows.filter((row) => changedNodeIds.has(row.__nodeId));
+  }
   const filename = `output_file_${outputFilenameStamp()}.${format}`;
+
+  if (!rows.length) {
+    showMessage("No changed rows to export.");
+    return;
+  }
 
   try {
     if (format === "csv") {
@@ -983,6 +1238,7 @@ function appendOutputRow(node, parentTicker, operatingTimezone, rows) {
   const parent = parentTicker ? formatOutputTicker(parentTicker) : "";
 
   rows.push({
+    __nodeId: node.id,
     parent,
     portfolio_code: "",
     portfolio_name: portfolioName,
@@ -1013,6 +1269,145 @@ function appendOutputRow(node, parentTicker, operatingTimezone, rows) {
 
 function formatOutputTicker(ticker) {
   return String(ticker || "").replaceAll("-", "_");
+}
+
+function hierarchyHeaders() {
+  const nodes = flattenNodes(treeData).filter((node) => !isVirtualRootNode(node));
+  const maxDepth = nodes.reduce((max, node) => Math.max(max, node.depth || 1), 1);
+  const levelCount = Math.max(levelColumns.length, maxDepth - 1, 1);
+  const levels = Array.from({ length: levelCount }, (_, index) => levelColumns[index] || `Level ${index + 1}`);
+  return ["Portfolio/Port Group Ticker", "Portfolio/Port Group Full Name", "CCY", ...levels];
+}
+
+function buildHierarchyRows(changesOnly) {
+  const headers = hierarchyHeaders();
+  const levelCount = headers.length - 3;
+  const rows = [];
+
+  function walk(node, ancestors) {
+    const ticker = node.ticker || node.id;
+    if (!isVirtualRootNode(node) && (!changesOnly || changedNodeIds.has(node.id))) {
+      const row = {
+        "Portfolio/Port Group Ticker": ticker,
+        "Portfolio/Port Group Full Name": node.name || ticker,
+        CCY: node.currency || "",
+        __level: ancestors.length + 1,
+      };
+      for (let index = 0; index < levelCount; index += 1) {
+        row[headers[3 + index]] = ancestors[index] || "";
+      }
+      rows.push(row);
+    }
+
+    const nextAncestors = isVirtualRootNode(node) ? ancestors : [...ancestors, ticker];
+    for (const child of node.children || []) {
+      walk(child, nextAncestors);
+    }
+  }
+
+  walk(treeData, []);
+  return { headers, rows };
+}
+
+function groupHierarchyRowsByLevel(rows) {
+  const byLevel = new Map();
+  for (const row of rows) {
+    const level = row.__level || 1;
+    if (!byLevel.has(level)) byLevel.set(level, []);
+    byLevel.get(level).push(row);
+  }
+
+  const sheets = {};
+  [...byLevel.keys()]
+    .sort((a, b) => a - b)
+    .forEach((level) => {
+      sheets[`Level_${level}`] = byLevel.get(level);
+    });
+  return sheets;
+}
+
+async function downloadHierarchyExport() {
+  if (!treeData) return;
+
+  const format = outputFormatSelect?.value || "csv";
+  const changesOnly = Boolean(outputChangesOnlyCheckbox?.checked);
+  const { headers, rows } = buildHierarchyRows(changesOnly);
+  const filename = `hierarchy_export_${outputFilenameStamp()}.${format}`;
+
+  if (!rows.length) {
+    showMessage("No changed rows to export.");
+    return;
+  }
+
+  try {
+    if (format === "csv") {
+      downloadBlob(new Blob([genericRowsToCsv(rows, headers)], { type: "text/csv;charset=utf-8;" }), filename);
+    } else if (format === "txt") {
+      downloadBlob(new Blob([genericRowsToTxt(rows, headers)], { type: "text/plain;charset=utf-8;" }), filename);
+    } else {
+      const sheets = groupHierarchyRowsByLevel(rows);
+      const response = await fetch("/api/export-hierarchy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sheets, headers, format }),
+      });
+      if (!response.ok) {
+        let errorMessage = "Could not generate hierarchy file.";
+        try {
+          const errorPayload = await response.json();
+          errorMessage = errorPayload.error || errorMessage;
+        } catch {
+          // Keep default message when the response is not JSON.
+        }
+        throw new Error(errorMessage);
+      }
+      downloadBlob(await response.blob(), filename);
+    }
+
+    closeOutputDialog();
+    clearMessage();
+    showMessage(
+      `Downloaded ${filename} (${format.toUpperCase()}) with ${rows.length} portfolio row${rows.length === 1 ? "" : "s"}.`
+    );
+  } catch (error) {
+    showMessage(error.message);
+  }
+}
+
+function genericRowsToCsv(rows, headers) {
+  const lines = [headers.map((header) => delimitedCell(header, ",")).join(",")];
+  for (const row of rows) {
+    lines.push(headers.map((header) => delimitedCell(row[header], ",")).join(","));
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+function genericRowsToTxt(rows, headers) {
+  const lines = [headers.map((header) => delimitedCell(header, "\t")).join("\t")];
+  for (const row of rows) {
+    lines.push(headers.map((header) => delimitedCell(row[header], "\t")).join("\t"));
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+function exportAuditLogCsv() {
+  if (!auditEntries.length) {
+    showMessage("No audit entries to export.");
+    return;
+  }
+
+  const headers = ["#", "Type", "Change", "Time"];
+  const rows = auditEntries.map((entry, index) => ({
+    "#": index + 1,
+    Type: entry.type,
+    Change: entry.summary,
+    Time: entry.timestamp,
+  }));
+
+  downloadBlob(
+    new Blob([genericRowsToCsv(rows, headers)], { type: "text/csv;charset=utf-8;" }),
+    `audit_log_${outputFilenameStamp()}.csv`
+  );
 }
 
 function rowsToCsv(rows) {
@@ -1050,7 +1445,30 @@ function handleBulkPaste() {
   updateEditModeUi();
 }
 
+function updateBulkTargetUI() {
+  if (!bulkTarget) return;
+
+  const node = selectedId ? findNode(selectedId, treeData) : null;
+  if (node) {
+    bulkTarget.innerHTML = `Adding under: <strong>${escapeHtml(node.ticker)}</strong>${
+      node.name && node.name !== node.ticker ? ` — ${escapeHtml(node.name)}` : ""
+    }. Leave "Location" blank in pasted rows to use this.`;
+    bulkTarget.classList.add("active");
+  } else {
+    bulkTarget.textContent = "Select a node in the tree to set where new portfolios will be added.";
+    bulkTarget.classList.remove("active");
+  }
+
+  if (bulkPaste?.value.trim()) {
+    bulkRows = parseBulkRows(bulkPaste.value);
+    renderBulkPreview();
+    updateEditModeUi();
+  }
+}
+
 function parseBulkRows(text) {
+  const defaultParent = selectedId ? findNode(selectedId, treeData) : null;
+
   return text
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -1059,16 +1477,17 @@ function parseBulkRows(text) {
     .map((line) => {
       const cells = splitPastedLine(line);
       const [name = "", currency = "", location = ""] = cells.map((cell) => cell.trim());
-      const parent = findBulkParent(location);
+      const parent = location ? findBulkParent(location) : defaultParent;
+      const effectiveLocation = location || (defaultParent ? defaultParent.ticker : "");
       const valid = Boolean(name && currency && parent);
       const status = valid
         ? "Ready"
-        : missingBulkFields(name, currency, location, parent).join(", ");
+        : missingBulkFields(name, currency, effectiveLocation, parent).join(", ");
 
       return {
         name,
         currency: currency.toUpperCase(),
-        location,
+        location: effectiveLocation,
         parent,
         valid,
         status,
@@ -1431,6 +1850,7 @@ function renderAudit() {
 function refreshReports() {
   qcErrors = buildQcErrors();
   qcErrorNodeIds = new Set(qcErrors.map((error) => error.nodeId));
+  updateQcBadge();
   renderQcFilters();
   renderQcReport();
   if (crossHeldActive) {
@@ -1441,19 +1861,23 @@ function refreshReports() {
   refreshNodeClasses();
 }
 
+const INVALID_TICKER_CHARS = /[^A-Za-z0-9_-]/;
+
 function buildQcErrors() {
   if (!treeData) return [];
 
   const errors = [];
-  for (const node of flattenNodes(treeData)) {
+  const siblingTickers = new Map();
+
+  walkNodeOccurrences(treeData, null, (node, parent) => {
     const currency = (node.currency || "").trim().toUpperCase();
     const level = node.depth || 1;
+    const ticker = (node.ticker || node.id || "").trim();
 
     if (currency && !VALID_CURRENCIES.has(currency)) {
       addQcError(errors, node, "Invalid CCY", `Currency "${currency}" is not in the approved CCY list.`, currency, level);
     }
 
-    const ticker = (node.ticker || node.id || "").trim();
     if (ticker.length > MAX_TICKER_LENGTH) {
       addQcError(
         errors,
@@ -1468,7 +1892,44 @@ function buildQcErrors() {
     if (level > MAX_TREE_DEPTH) {
       addQcError(errors, node, "Tree Level Limit", `Level ${level} exceeds the ${MAX_TREE_DEPTH}-level tree limit.`, currency || "N/A", level);
     }
-  }
+
+    if (!ticker) {
+      addQcError(errors, node, "Empty Ticker", "This node has no ticker value.", currency || "N/A", level);
+    }
+
+    if (!(node.name || "").trim()) {
+      addQcError(errors, node, "Empty Name", `Portfolio "${ticker || node.id}" has no full name.`, currency || "N/A", level);
+    }
+
+    if (ticker && INVALID_TICKER_CHARS.test(ticker)) {
+      addQcError(
+        errors,
+        node,
+        "Invalid Ticker Characters",
+        `Ticker "${ticker}" contains characters other than letters, numbers, "-", or "_".`,
+        currency || "N/A",
+        level
+      );
+    }
+
+    if (parent) {
+      const key = `${parent.id}::${ticker.toUpperCase()}`;
+      if (ticker) {
+        if (siblingTickers.has(key)) {
+          addQcError(
+            errors,
+            node,
+            "Duplicate Sibling Ticker",
+            `Ticker "${ticker}" appears more than once under parent "${parent.ticker || parent.id}".`,
+            currency || "N/A",
+            level
+          );
+        } else {
+          siblingTickers.set(key, node.id);
+        }
+      }
+    }
+  });
 
   return errors;
 }
@@ -1903,7 +2364,16 @@ function expandAncestors(nodeId) {
 }
 
 function focusNode(nodeId) {
-  if (!nodeId || !latestNodePositions.has(nodeId)) return;
+  if (!nodeId) return;
+
+  if (treeViewMode === "outline") {
+    outlineBody
+      ?.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+
+  if (!latestNodePositions.has(nodeId)) return;
   const width = treeElement.clientWidth || 900;
   const height = treeElement.clientHeight || 620;
   const position = latestNodePositions.get(nodeId);
@@ -2098,6 +2568,7 @@ function bindAxisScrollControl({ track, thumb, axis, getMetrics, setDragging, ap
 }
 
 function updateTreeScrollbarState() {
+  if (treeViewMode === "outline") return;
   if ((!treeScrollTrack && !treeScrollTrackH) || !latestNodePositions.size) return;
 
   const bounds = measureScrollContentBounds();

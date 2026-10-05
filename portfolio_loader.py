@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import io
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO, Iterable
 
@@ -41,6 +41,9 @@ class LoadedPortfolio:
     tree: dict
     row_count: int
     level_columns: list[str]
+    rows_loaded: int = 0
+    rows_skipped: int = 0
+    warnings: list[str] = field(default_factory=list)
 
 
 class PortfolioLoadError(ValueError):
@@ -55,12 +58,15 @@ def load_portfolio(path: str | Path) -> LoadedPortfolio:
         raise PortfolioLoadError(f"Data file does not exist: {file_path}")
 
     frame = _read_dataframe(file_path)
-    tree, level_columns = dataframe_to_tree(frame)
+    tree, level_columns, report = dataframe_to_tree(frame)
     return LoadedPortfolio(
         source_name=file_path.name,
         tree=tree,
         row_count=len(frame),
         level_columns=level_columns,
+        rows_loaded=report["rows_loaded"],
+        rows_skipped=report["rows_skipped"],
+        warnings=report["warnings"],
     )
 
 
@@ -81,17 +87,25 @@ def load_portfolio_upload(file_obj: BinaryIO, filename: str) -> LoadedPortfolio:
     else:
         raise PortfolioLoadError("Please upload a .csv, .xlsx, .xls, or .ods file.")
 
-    tree, level_columns = dataframe_to_tree(frame)
+    tree, level_columns, report = dataframe_to_tree(frame)
     return LoadedPortfolio(
         source_name=filename,
         tree=tree,
         row_count=len(frame),
         level_columns=level_columns,
+        rows_loaded=report["rows_loaded"],
+        rows_skipped=report["rows_skipped"],
+        warnings=report["warnings"],
     )
 
 
-def dataframe_to_tree(frame: pd.DataFrame) -> tuple[dict, list[str]]:
-    """Convert flat portfolio rows into nested tree JSON."""
+def dataframe_to_tree(frame: pd.DataFrame) -> tuple[dict, list[str], dict]:
+    """Convert flat portfolio rows into nested tree JSON.
+
+    Returns the tree, the detected ``Level N`` columns, and an import report
+    (rows loaded/skipped plus warnings) so the caller can show the user what
+    happened during the import, not just whether it succeeded.
+    """
 
     if frame.empty:
         raise PortfolioLoadError("The selected file does not contain any rows.")
@@ -102,24 +116,48 @@ def dataframe_to_tree(frame: pd.DataFrame) -> tuple[dict, list[str]]:
     currency_columns = _find_optional_columns(frame.columns, CURRENCY_COLUMNS)
     level_columns = _level_columns(frame.columns)
 
+    warnings: list[str] = []
+    unrecognized = _unrecognized_columns(frame.columns, currency_columns, level_columns, ticker_col, name_col)
+    if unrecognized:
+        warnings.append(
+            f"Unrecognized column(s) ignored: {', '.join(unrecognized)}"
+        )
+
     nodes: dict[str, dict] = {}
     root_ids: list[str] = []
+    rows_loaded = 0
+    rows_skipped = 0
+    seen_paths: set[str] = set()
+    missing_currency_rows: list[int] = []
+    duplicate_path_rows: list[int] = []
 
     for row_number, row in frame.iterrows():
+        source_row = int(row_number) + 2
         ticker = _clean_cell(row.get(ticker_col))
         if not ticker:
+            rows_skipped += 1
             continue
 
+        rows_loaded += 1
         node = nodes.setdefault(ticker, _make_node(ticker))
         node["name"] = _clean_cell(row.get(name_col)) or node["name"] or ticker
-        node["currency"] = _first_non_empty_cell(row, currency_columns)
-        node["sourceRow"] = int(row_number) + 2
+        currency = _first_non_empty_cell(row, currency_columns)
+        node["currency"] = currency
+        node["sourceRow"] = source_row
+
+        if not currency:
+            missing_currency_rows.append(source_row)
 
         ancestors = [
             value
             for value in (_clean_cell(row.get(column)) for column in level_columns)
             if value and value != ticker
         ]
+
+        path_key = " > ".join(ancestors + [ticker])
+        if path_key in seen_paths:
+            duplicate_path_rows.append(source_row)
+        seen_paths.add(path_key)
 
         for ancestor in ancestors:
             nodes.setdefault(ancestor, _make_node(ancestor))
@@ -134,18 +172,44 @@ def dataframe_to_tree(frame: pd.DataFrame) -> tuple[dict, list[str]]:
     if not nodes:
         raise PortfolioLoadError("No portfolio tickers were found in the file.")
 
+    if rows_skipped:
+        warnings.append(f"{rows_skipped} row(s) skipped: missing ticker.")
+    if missing_currency_rows:
+        warnings.append(
+            f"{len(missing_currency_rows)} row(s) missing currency "
+            f"(source row {missing_currency_rows[0]}"
+            f"{', …' if len(missing_currency_rows) > 1 else ''})."
+        )
+    if duplicate_path_rows:
+        warnings.append(
+            f"{len(duplicate_path_rows)} row(s) repeat an identical hierarchy path "
+            f"(source row {duplicate_path_rows[0]}"
+            f"{', …' if len(duplicate_path_rows) > 1 else ''})."
+        )
+
     _hydrate_paths(nodes, root_ids)
     roots = [nodes[root_id] for root_id in root_ids if root_id in nodes]
 
     if not roots:
         roots = _infer_roots(nodes)
+        if roots:
+            warnings.append(
+                "No explicit root row found; the hierarchy was inferred from "
+                "nodes with no parent."
+            )
 
     for node in nodes.values():
         node["type"] = "branch" if node["children"] else "leaf"
         node["childCount"] = len(node["children"])
 
+    report = {
+        "rows_loaded": rows_loaded,
+        "rows_skipped": rows_skipped,
+        "warnings": warnings,
+    }
+
     if len(roots) == 1:
-        return roots[0], level_columns
+        return roots[0], level_columns, report
 
     virtual_root = {
         "id": "portfolio-root",
@@ -159,7 +223,18 @@ def dataframe_to_tree(frame: pd.DataFrame) -> tuple[dict, list[str]]:
         "childCount": len(roots),
         "children": roots,
     }
-    return virtual_root, level_columns
+    return virtual_root, level_columns, report
+
+
+def _unrecognized_columns(
+    columns: Iterable[str],
+    currency_columns: list[str],
+    level_columns: list[str],
+    ticker_col: str,
+    name_col: str,
+) -> list[str]:
+    known = {ticker_col, name_col, *currency_columns, *level_columns}
+    return [column for column in columns if column not in known]
 
 
 def _read_dataframe(path: Path) -> pd.DataFrame:

@@ -56,6 +56,12 @@
           </svg>
           Generate Output
         </button>
+        <button type="button" id="export-hierarchy" class="btn-secondary">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M4 10h12M12 6l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Export Hierarchy
+        </button>
       </form>
     </header>
 
@@ -66,12 +72,27 @@
             <span class="dataset-badge">Active dataset</span>
             <strong id="dataset-name">Loading...</strong>
             <span id="dataset-meta"></span>
+            <span id="qc-badge" class="qc-badge qc-badge-clean" hidden></span>
           </div>
           <div class="legend" aria-label="Tree legend">
             <span class="legend-pill branch-pill"><i class="dot branch"></i> Branch</span>
             <span class="legend-pill leaf-pill"><i class="dot leaf"></i> Portfolio</span>
             <span class="legend-pill error-pill"><i class="dot error"></i> QC Error</span>
             <span class="legend-pill crossheld-pill"><i class="dot crossheld"></i> Duplicate</span>
+          </div>
+          <div class="view-switch" role="group" aria-label="Tree view mode">
+            <button type="button" id="view-graph" class="view-switch-btn active" aria-pressed="true">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M4 10h4M12 5h4M12 15h4M8 10V5h4M8 10v5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Tree view
+            </button>
+            <button type="button" id="view-outline" class="view-switch-btn" aria-pressed="false">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M4 5h12M7 10h9M10 15h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+              Outline view
+            </button>
           </div>
         </div>
         <div class="tree-nav" aria-label="Tree navigation controls">
@@ -118,6 +139,21 @@
               <div id="tree-scroll-thumb-h" class="tree-scroll-thumb"></div>
             </div>
           </div>
+          <div id="outline-view" class="outline-view" hidden>
+            <table class="outline-table">
+              <thead>
+                <tr>
+                  <th scope="col" class="outline-col-level">Level</th>
+                  <th scope="col" class="outline-col-tree">Tree</th>
+                  <th scope="col">Ticker</th>
+                  <th scope="col">Full Name</th>
+                  <th scope="col">CCY</th>
+                  <th scope="col">Parent</th>
+                </tr>
+              </thead>
+              <tbody id="outline-body"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -157,13 +193,14 @@
               <div class="bulk-header">
                 <div>
                   <h3>Add Multiple Portfolios</h3>
-                  <p>Paste Excel rows: Full Name, Currency, Location</p>
+                  <p>Paste Excel rows: Full Name, Currency, Location (optional — see below)</p>
                 </div>
               </div>
+              <div id="bulk-target" class="bulk-target">Select a node in the tree to set where new portfolios will be added.</div>
               <textarea
                 id="bulk-paste"
                 class="bulk-paste"
-                placeholder="Example:&#10;UK Equity Portfolio&#9;GBP&#9;BCPROP&#10;Euro Bond Portfolio&#9;EUR&#9;BCFUND"
+                placeholder="Example (Location optional if a node is selected):&#10;UK Equity Portfolio&#9;GBP&#9;BCPROP&#10;Euro Bond Portfolio&#9;EUR"
                 rows="4"
                 disabled
               ></textarea>
@@ -268,6 +305,7 @@
                   <h3>Change Audit</h3>
                   <p id="audit-count">No changes yet</p>
                 </div>
+                <button type="button" id="audit-export" class="btn-secondary small">Export audit log (CSV)</button>
               </div>
               <div class="audit-table-wrap">
                 <table class="audit-table" aria-label="Change audit log">
@@ -337,7 +375,14 @@
           </svg>
         </div>
         <h2 id="output-dialog-title">Generate Output File</h2>
-        <p>Select the output format and operating timezone for the exported portfolio file.</p>
+        <p id="output-dialog-description">Select the output format and operating timezone for the exported portfolio file.</p>
+        <label class="dialog-field" id="output-timezone-field">
+          <span>Operating timezone</span>
+          <select id="output-timezone">
+            <option value="EU/Berlin">EU/Berlin</option>
+            <option value="US/Central">US/Central</option>
+          </select>
+        </label>
         <label class="dialog-field">
           <span>Output format</span>
           <select id="output-format">
@@ -347,16 +392,29 @@
             <option value="ods">OpenDocument (.ods)</option>
           </select>
         </label>
-        <label class="dialog-field">
-          <span>Operating timezone</span>
-          <select id="output-timezone">
-            <option value="EU/Berlin">EU/Berlin</option>
-            <option value="US/Central">US/Central</option>
-          </select>
+        <label class="dialog-checkbox">
+          <input type="checkbox" id="output-changes-only">
+          <span>Export changed rows only</span>
         </label>
         <div class="dialog-actions">
           <button type="button" id="output-cancel" class="btn-secondary">Cancel</button>
           <button type="button" id="output-confirm" class="btn-primary">Download output</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="import-report-dialog" class="dialog-overlay" hidden>
+      <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="import-report-title">
+        <div id="import-report-icon" class="dialog-icon warning" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h2 id="import-report-title">Import Report</h2>
+        <p id="import-report-message"></p>
+        <ul id="import-report-details" class="dialog-details"></ul>
+        <div class="dialog-actions">
+          <button type="button" id="import-report-ok" class="btn-primary">OK</button>
         </div>
       </div>
     </div>

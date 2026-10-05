@@ -14,7 +14,11 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
-from portfolio_exporter import export_output_rows
+from portfolio_exporter import (
+    export_hierarchy_rows,
+    export_hierarchy_workbook,
+    export_output_rows,
+)
 from portfolio_loader import PortfolioLoadError, load_portfolio, load_portfolio_upload
 
 
@@ -91,6 +95,39 @@ def generate_output():
     )
 
 
+@app.post("/api/export-hierarchy")
+def export_hierarchy():
+    payload = request.get_json(silent=True) or {}
+    rows = payload.get("rows")
+    sheets = payload.get("sheets")
+    headers = payload.get("headers")
+    fmt = (payload.get("format") or "csv").lower()
+
+    if not isinstance(headers, list) or not headers:
+        return jsonify({"error": "No hierarchy columns were provided for export."}), 400
+
+    try:
+        if isinstance(sheets, dict) and sheets:
+            content, mime_type = export_hierarchy_workbook(sheets, headers, fmt)
+        elif isinstance(rows, list) and rows:
+            content, mime_type = export_hierarchy_rows(rows, headers, fmt)
+        else:
+            return jsonify({"error": "No portfolio rows were provided for export."}), 400
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Could not generate hierarchy file: {exc}"}), 500
+
+    buffer = io.BytesIO(content)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        mimetype=mime_type,
+        as_attachment=True,
+        download_name=f"hierarchy_export.{fmt}",
+    )
+
+
 def _set_active_dataset(loaded) -> None:
     active_dataset.clear()
     active_dataset.update(
@@ -99,6 +136,9 @@ def _set_active_dataset(loaded) -> None:
             "rowCount": loaded.row_count,
             "levelColumns": loaded.level_columns,
             "tree": loaded.tree,
+            "rowsLoaded": loaded.rows_loaded,
+            "rowsSkipped": loaded.rows_skipped,
+            "warnings": loaded.warnings,
         }
     )
 
