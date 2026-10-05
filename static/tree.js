@@ -45,10 +45,10 @@ const crossheldCount = document.querySelector("#crossheld-count");
 const crossheldTableBody = document.querySelector("#crossheld-table-body");
 const crossheldAnalyzeButton = document.querySelector("#crossheld-analyze");
 const bulkTarget = document.querySelector("#bulk-target");
-const bulkPaste = document.querySelector("#bulk-paste");
+const bulkGridBody = document.querySelector("#bulk-grid-body");
+const bulkAddRowButton = document.querySelector("#bulk-add-row");
 const bulkClearButton = document.querySelector("#bulk-clear");
 const bulkAddButton = document.querySelector("#bulk-add");
-const bulkPreviewBody = document.querySelector("#bulk-preview-body");
 const confirmDialog = document.querySelector("#confirm-dialog");
 const dialogIcon = document.querySelector("#dialog-icon");
 const dialogTitle = document.querySelector("#dialog-title");
@@ -222,9 +222,16 @@ editModeToggle.addEventListener("click", toggleEditMode);
 undoButton.addEventListener("click", undoLastChange);
 redoButton.addEventListener("click", redoLastChange);
 undoAllButton.addEventListener("click", undoAllChanges);
-bulkPaste.addEventListener("input", handleBulkPaste);
+bulkAddRowButton?.addEventListener("click", () => appendBulkRow(true));
 bulkClearButton.addEventListener("click", clearBulkRows);
 bulkAddButton.addEventListener("click", addBulkPortfolios);
+bulkGridBody?.addEventListener("input", handleBulkCellInput);
+bulkGridBody?.addEventListener("paste", handleBulkCellPaste);
+bulkGridBody?.addEventListener("keydown", handleBulkCellKeydown);
+bulkGridBody?.addEventListener("click", (event) => {
+  const remove = event.target.closest("[data-bulk-remove]");
+  if (remove) removeBulkRow(Number(remove.dataset.bulkRemove));
+});
 qcFilterError?.addEventListener("change", renderQcReport);
 qcFilterLevel?.addEventListener("change", renderQcReport);
 qcTableBody?.addEventListener("click", (event) => {
@@ -416,12 +423,11 @@ function applyDataset(payload) {
   crossHeldNodeIds = new Set();
   crossHeldActive = false;
   bulkRows = [];
-  bulkPaste.value = "";
   hideQcCallout();
   editModeEnabled = false;
   updateEditModeUi();
   renderAudit();
-  renderBulkPreview();
+  renderBulkGrid();
   updateBulkTargetUI();
   refreshReports();
 
@@ -892,7 +898,7 @@ function bindEditor(data) {
   });
   document.querySelector("#add-here")?.addEventListener("click", () => {
     activateTab("add");
-    bulkPaste?.focus();
+    bulkGridBody?.querySelector('[data-bulk-field="ticker"]:not([disabled])')?.focus();
   });
 }
 
@@ -935,9 +941,7 @@ function updateEditModeUi() {
   undoButton.disabled = undoStack.length === 0;
   redoButton.disabled = redoStack.length === 0;
   undoAllButton.disabled = undoStack.length === 0;
-  bulkPaste.disabled = !editModeEnabled;
-  bulkClearButton.disabled = !editModeEnabled || !bulkPaste.value.trim();
-  bulkAddButton.disabled = !editModeEnabled || !bulkRows.some((row) => row.valid);
+  renderBulkGrid();
 }
 
 function recordChange({ type, nodeId, summary, before }) {
@@ -1439,10 +1443,246 @@ function csvCell(value) {
   return delimitedCell(value, ",");
 }
 
-function handleBulkPaste() {
-  bulkRows = parseBulkRows(bulkPaste.value);
-  renderBulkPreview();
-  updateEditModeUi();
+const BULK_FIELDS = ["ticker", "name", "currency", "location"];
+const BULK_MIN_ROWS = 3;
+
+function emptyBulkRow() {
+  return { ticker: "", name: "", currency: "", location: "" };
+}
+
+function ensureBulkRows() {
+  if (!bulkRows.length) {
+    bulkRows = Array.from({ length: BULK_MIN_ROWS }, emptyBulkRow);
+  }
+}
+
+function isBlankBulkRow(row) {
+  return BULK_FIELDS.every((field) => !String(row[field] || "").trim());
+}
+
+function evaluateBulkRow(row) {
+  const defaultParent = selectedId ? findNode(selectedId, treeData) : null;
+  const ticker = String(row.ticker || "").trim();
+  const name = String(row.name || "").trim();
+  const currency = String(row.currency || "").trim().toUpperCase();
+  const location = String(row.location || "").trim();
+
+  if (isBlankBulkRow(row)) {
+    return { blank: true, valid: false, status: "", parent: null, resolvedTicker: "" };
+  }
+
+  const parent = location ? findBulkParent(location) : defaultParent;
+  const resolvedTicker = ticker || (name ? tickerFromName(name) : "");
+  const problems = [];
+
+  if (!name) problems.push("Missing full name");
+  if (!currency) problems.push("Missing currency");
+  else if (!VALID_CURRENCIES.has(currency)) problems.push(`Unknown currency: ${currency}`);
+  if (!location && !defaultParent) problems.push("Missing location");
+  if (location && !parent) problems.push(`Unknown location: ${location}`);
+  if (ticker && ticker.length > MAX_TICKER_LENGTH) {
+    problems.push(`Ticker over ${MAX_TICKER_LENGTH} characters`);
+  }
+  if (ticker && /[^A-Za-z0-9_-]/.test(ticker)) problems.push("Invalid ticker characters");
+
+  if (problems.length) {
+    return { blank: false, valid: false, status: problems.join(", "), parent, resolvedTicker };
+  }
+
+  return {
+    blank: false,
+    valid: true,
+    status: ticker ? "Ready" : `Ready — ticker ${resolvedTicker}`,
+    parent,
+    resolvedTicker,
+  };
+}
+
+function effectiveBulkLocation(row) {
+  const location = String(row.location || "").trim();
+  if (location) return location;
+  const defaultParent = selectedId ? findNode(selectedId, treeData) : null;
+  return defaultParent ? defaultParent.ticker : "";
+}
+
+function renderBulkGrid() {
+  if (!bulkGridBody) return;
+  ensureBulkRows();
+
+  bulkGridBody.innerHTML = bulkRows
+    .map((row, index) => {
+      const result = evaluateBulkRow(row);
+      const rowClass = result.blank ? "" : result.valid ? "valid" : "invalid";
+      const cell = (field, placeholder, extra = "") => `
+        <td>
+          <input
+            type="text"
+            class="bulk-cell"
+            data-bulk-index="${index}"
+            data-bulk-field="${field}"
+            value="${escapeAttribute(row[field] || "")}"
+            placeholder="${escapeAttribute(placeholder)}"
+            autocomplete="off"
+            ${extra}
+            ${editModeEnabled ? "" : "disabled"}
+          >
+        </td>
+      `;
+
+      return `
+        <tr class="${rowClass}">
+          ${cell("ticker", "auto", `maxlength="${MAX_TICKER_LENGTH}"`)}
+          ${cell("name", "Full name")}
+          ${cell("currency", "CCY", 'maxlength="3"')}
+          ${cell("location", effectiveBulkLocation(row) || "Parent ticker")}
+          <td class="bulk-status-cell">${bulkStatusHtml(result)}</td>
+          <td class="bulk-remove-col">
+            <button type="button" class="bulk-remove" data-bulk-remove="${index}" aria-label="Remove row ${index + 1}" ${
+              editModeEnabled ? "" : "disabled"
+            }>&times;</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  updateBulkButtons();
+}
+
+function bulkStatusHtml(result) {
+  if (result.blank) return '<span class="bulk-status empty">&mdash;</span>';
+  return `<span class="bulk-status ${result.valid ? "ready" : "error"}">${escapeHtml(result.status)}</span>`;
+}
+
+function refreshBulkStatuses() {
+  if (!bulkGridBody) return;
+
+  const tableRows = [...bulkGridBody.querySelectorAll("tr")];
+  bulkRows.forEach((row, index) => {
+    const tableRow = tableRows[index];
+    if (!tableRow) return;
+
+    const result = evaluateBulkRow(row);
+    tableRow.className = result.blank ? "" : result.valid ? "valid" : "invalid";
+
+    const statusCell = tableRow.querySelector(".bulk-status-cell");
+    if (statusCell) statusCell.innerHTML = bulkStatusHtml(result);
+
+    const locationInput = tableRow.querySelector('[data-bulk-field="location"]');
+    if (locationInput) locationInput.placeholder = effectiveBulkLocation(row) || "Parent ticker";
+  });
+
+  updateBulkButtons();
+}
+
+function updateBulkButtons() {
+  const hasValid = bulkRows.some((row) => evaluateBulkRow(row).valid);
+  const hasContent = bulkRows.some((row) => !isBlankBulkRow(row));
+
+  if (bulkAddRowButton) bulkAddRowButton.disabled = !editModeEnabled;
+  if (bulkClearButton) bulkClearButton.disabled = !editModeEnabled || !hasContent;
+  if (bulkAddButton) bulkAddButton.disabled = !editModeEnabled || !hasValid;
+}
+
+function handleBulkCellInput(event) {
+  const input = event.target.closest("[data-bulk-field]");
+  if (!input) return;
+
+  const index = Number(input.dataset.bulkIndex);
+  if (!bulkRows[index]) return;
+
+  bulkRows[index][input.dataset.bulkField] = input.value;
+
+  // Update statuses only -- a full re-render here would steal focus from the cell.
+  refreshBulkStatuses();
+
+  // Typing in the last row grows the grid, so there is always a spare row.
+  if (index === bulkRows.length - 1 && !isBlankBulkRow(bulkRows[index])) {
+    bulkRows.push(emptyBulkRow());
+    rerenderBulkGridKeepingFocus();
+  }
+}
+
+function rerenderBulkGridKeepingFocus() {
+  const active = document.activeElement;
+  const field = active?.dataset?.bulkField;
+  const index = active?.dataset?.bulkIndex;
+  const caret = active?.selectionStart;
+
+  renderBulkGrid();
+
+  if (field && index !== undefined) {
+    const restored = bulkGridBody.querySelector(
+      `[data-bulk-index="${index}"][data-bulk-field="${field}"]`
+    );
+    if (restored) {
+      restored.focus();
+      if (caret !== null && caret !== undefined) restored.setSelectionRange(caret, caret);
+    }
+  }
+}
+
+function appendBulkRow(focusNew) {
+  bulkRows.push(emptyBulkRow());
+  renderBulkGrid();
+  if (focusNew) {
+    bulkGridBody
+      ?.querySelector(`[data-bulk-index="${bulkRows.length - 1}"][data-bulk-field="ticker"]`)
+      ?.focus();
+  }
+}
+
+function removeBulkRow(index) {
+  if (!editModeEnabled || !bulkRows[index]) return;
+  bulkRows.splice(index, 1);
+  ensureBulkRows();
+  renderBulkGrid();
+}
+
+function handleBulkCellKeydown(event) {
+  const input = event.target.closest("[data-bulk-field]");
+  if (!input) return;
+
+  if (event.key === "Enter") {
+    event.preventDefault();
+    const index = Number(input.dataset.bulkIndex);
+    const next = bulkGridBody.querySelector(
+      `[data-bulk-index="${index + 1}"][data-bulk-field="${input.dataset.bulkField}"]`
+    );
+    if (next) next.focus();
+    else appendBulkRow(true);
+  }
+}
+
+function handleBulkCellPaste(event) {
+  const input = event.target.closest("[data-bulk-field]");
+  if (!input) return;
+
+  const text = event.clipboardData?.getData("text/plain") || "";
+  if (!text.includes("\t") && !text.includes("\n")) return; // Single value: let the browser paste normally.
+
+  event.preventDefault();
+
+  const startRow = Number(input.dataset.bulkIndex);
+  const startField = BULK_FIELDS.indexOf(input.dataset.bulkField);
+  const lines = text
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .filter((line) => !isBulkHeaderRow(splitPastedLine(line)));
+
+  lines.forEach((line, lineIndex) => {
+    const cells = splitPastedLine(line).map((cell) => cell.trim());
+    const targetIndex = startRow + lineIndex;
+    while (bulkRows.length <= targetIndex) bulkRows.push(emptyBulkRow());
+
+    cells.forEach((value, cellIndex) => {
+      const field = BULK_FIELDS[startField + cellIndex];
+      if (field) bulkRows[targetIndex][field] = value;
+    });
+  });
+
+  if (!bulkRows.some(isBlankBulkRow)) bulkRows.push(emptyBulkRow());
+  renderBulkGrid();
 }
 
 function updateBulkTargetUI() {
@@ -1451,57 +1691,23 @@ function updateBulkTargetUI() {
   const node = selectedId ? findNode(selectedId, treeData) : null;
   if (node) {
     bulkTarget.innerHTML = `Adding under: <strong>${escapeHtml(node.ticker)}</strong>${
-      node.name && node.name !== node.ticker ? ` — ${escapeHtml(node.name)}` : ""
-    }. Leave "Location" blank in pasted rows to use this.`;
+      node.name && node.name !== node.ticker ? ` &mdash; ${escapeHtml(node.name)}` : ""
+    }. Leave "Location" blank to use this.`;
     bulkTarget.classList.add("active");
   } else {
     bulkTarget.textContent = "Select a node in the tree to set where new portfolios will be added.";
     bulkTarget.classList.remove("active");
   }
 
-  if (bulkPaste?.value.trim()) {
-    bulkRows = parseBulkRows(bulkPaste.value);
-    renderBulkPreview();
-    updateEditModeUi();
-  }
-}
-
-function parseBulkRows(text) {
-  const defaultParent = selectedId ? findNode(selectedId, treeData) : null;
-
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !isBulkHeaderRow(splitPastedLine(line)))
-    .map((line) => {
-      const cells = splitPastedLine(line);
-      const [name = "", currency = "", location = ""] = cells.map((cell) => cell.trim());
-      const parent = location ? findBulkParent(location) : defaultParent;
-      const effectiveLocation = location || (defaultParent ? defaultParent.ticker : "");
-      const valid = Boolean(name && currency && parent);
-      const status = valid
-        ? "Ready"
-        : missingBulkFields(name, currency, effectiveLocation, parent).join(", ");
-
-      return {
-        name,
-        currency: currency.toUpperCase(),
-        location: effectiveLocation,
-        parent,
-        valid,
-        status,
-      };
-    });
+  refreshBulkStatuses();
 }
 
 function isBulkHeaderRow(cells) {
   const normalized = cells.map((cell) => cell.trim().toLowerCase());
-  return (
-    normalized.includes("full name") &&
-    normalized.includes("currency") &&
-    (normalized.includes("location") || normalized.includes("parent"))
-  );
+  const hasName = normalized.some((cell) => cell.includes("full name") || cell === "name");
+  const hasCurrency = normalized.some((cell) => cell === "ccy" || cell.includes("currency"));
+  const hasTicker = normalized.some((cell) => cell.includes("ticker"));
+  return (hasName && hasCurrency) || (hasTicker && hasName);
 }
 
 function findBulkParent(location) {
@@ -1520,45 +1726,11 @@ function splitPastedLine(line) {
   return line.split(/\s{2,}/);
 }
 
-function missingBulkFields(name, currency, location, parent) {
-  const missing = [];
-  if (!name) missing.push("Missing full name");
-  if (!currency) missing.push("Missing currency");
-  if (!location) missing.push("Missing location");
-  if (location && !parent) missing.push(`Unknown location: ${location}`);
-  return missing;
-}
-
-function renderBulkPreview() {
-  if (!bulkRows.length) {
-    bulkPreviewBody.innerHTML = `
-      <tr class="bulk-empty-row">
-        <td colspan="4">${editModeEnabled ? "Paste rows from Excel to preview them here." : "Enable edit mode, then paste rows from Excel."}</td>
-      </tr>
-    `;
-    return;
-  }
-
-  bulkPreviewBody.innerHTML = bulkRows
-    .map(
-      (row) => `
-        <tr class="${row.valid ? "valid" : "invalid"}">
-          <td>${escapeHtml(row.name)}</td>
-          <td>${escapeHtml(row.currency)}</td>
-          <td>${escapeHtml(row.location)}</td>
-          <td><span class="bulk-status ${row.valid ? "ready" : "error"}">${escapeHtml(row.status)}</span></td>
-        </tr>
-      `
-    )
-    .join("");
-}
-
 function clearBulkRows() {
-  bulkPaste.value = "";
-  bulkRows = [];
-  renderBulkPreview();
-  updateEditModeUi();
+  bulkRows = Array.from({ length: BULK_MIN_ROWS }, emptyBulkRow);
+  renderBulkGrid();
 }
+
 
 function addBulkPortfolios() {
   if (!editModeEnabled) {
@@ -1566,7 +1738,9 @@ function addBulkPortfolios() {
     return;
   }
 
-  const validRows = bulkRows.filter((row) => row.valid);
+  const validRows = bulkRows
+    .map((row) => ({ ...row, ...evaluateBulkRow(row) }))
+    .filter((row) => row.valid);
   if (!validRows.length) return;
 
   processBulkPortfolioRows(validRows);
@@ -1578,7 +1752,7 @@ async function processBulkPortfolioRows(validRows) {
   const touchedTickers = [];
 
   for (const row of validRows) {
-    const existing = findExistingPortfolioForAdd(row.name);
+    const existing = findExistingPortfolioForAdd(row.resolvedTicker, row.name);
     const targetParent = row.parent;
 
     if (existing) {
@@ -1607,13 +1781,13 @@ async function processBulkPortfolioRows(validRows) {
       continue;
     }
 
-    const ticker = tickerFromName(row.name);
+    const ticker = row.resolvedTicker || tickerFromName(row.name);
     const node = {
       id: ticker,
       ticker,
       label: ticker,
-      name: row.name,
-      currency: row.currency,
+      name: String(row.name).trim(),
+      currency: String(row.currency).trim().toUpperCase(),
       type: "leaf",
       path: ticker,
       sourceRow: null,
@@ -1682,12 +1856,11 @@ function closeDuplicateDialog(result) {
   }
 }
 
-function findExistingPortfolioForAdd(name) {
-  const ticker = tickerFromName(name);
+function findExistingPortfolioForAdd(ticker, name) {
   const byTicker = findNodesByTicker(ticker);
   if (byTicker.length) return byTicker[0];
 
-  const normalizedName = name.trim().toLowerCase();
+  const normalizedName = String(name || "").trim().toLowerCase();
   if (!normalizedName) return null;
   return (
     flattenNodes(treeData).find(
@@ -1711,7 +1884,7 @@ function tickerFromName(name) {
     name
       .toUpperCase()
       .replace(/[^A-Z0-9]+/g, "")
-      .slice(0, 12) || "PORTFOLIO"
+      .slice(0, MAX_TICKER_LENGTH) || "PORTFOLIO"
   );
 }
 

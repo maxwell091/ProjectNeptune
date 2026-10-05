@@ -808,33 +808,6 @@ button:disabled:hover {
   font-weight: 700;
 }
 
-.bulk-paste {
-  width: 100%;
-  min-height: 86px;
-  resize: vertical;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 1.45;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  outline: 0;
-  padding: 11px 12px;
-}
-
-.bulk-paste:focus {
-  border-color: rgba(79, 70, 229, 0.45);
-  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
-}
-
-.bulk-paste:disabled {
-  color: var(--muted);
-  background: #f1f5f9;
-  cursor: not-allowed;
-}
-
 .bulk-actions {
   display: flex;
   justify-content: flex-end;
@@ -843,11 +816,97 @@ button:disabled:hover {
 }
 
 .bulk-table-wrap {
-  max-height: 180px;
+  max-height: 260px;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: #fff;
+}
+
+.bulk-grid td {
+  padding: 4px 5px;
+  vertical-align: middle;
+}
+
+.bulk-grid th {
+  padding: 9px 8px;
+}
+
+.bulk-cell {
+  width: 100%;
+  min-width: 56px;
+  padding: 7px 8px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  background: #fff;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  outline: 0;
+}
+
+.bulk-cell::placeholder {
+  color: #b2bccd;
+  font-weight: 600;
+}
+
+.bulk-cell:hover:not(:disabled) {
+  border-color: var(--border);
+}
+
+.bulk-cell:focus {
+  border-color: rgba(79, 70, 229, 0.5);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+}
+
+.bulk-cell:disabled {
+  color: var(--muted);
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.bulk-grid [data-bulk-field="ticker"],
+.bulk-grid [data-bulk-field="currency"] {
+  font-family: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  text-transform: uppercase;
+}
+
+.bulk-status-cell {
+  white-space: nowrap;
+}
+
+.bulk-status.empty {
+  color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.bulk-remove-col {
+  width: 28px;
+  text-align: center;
+}
+
+.bulk-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.bulk-remove:hover:not(:disabled) {
+  color: var(--error-dark);
+  background: var(--error-soft);
+  border-color: rgba(220, 38, 38, 0.2);
+  transform: none;
 }
 
 .bulk-table {
