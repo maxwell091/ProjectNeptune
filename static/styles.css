@@ -1883,6 +1883,13 @@ button:disabled:hover {
   border-bottom: 1px solid rgba(226, 232, 240, 0.7);
 }
 
+/* Bottom-level portfolios get a light green wash so the end of each
+   branch is obvious at a glance. Listed before the state rules below
+   so hover, selection, and QC colours still win. */
+.outline-row.leaf {
+  background: rgba(209, 250, 229, 0.45);
+}
+
 .outline-row:hover {
   background: var(--primary-soft);
 }
