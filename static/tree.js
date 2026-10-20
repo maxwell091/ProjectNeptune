@@ -519,7 +519,7 @@ function outlineRowHtml({ node, level, parentTicker }) {
           <span class="outline-ticker ${levelClass}">${escapeHtml(ticker)}</span>
         </span>
       </td>
-      <td class="outline-cell">${escapeHtml(ticker)}</td>
+      <td class="outline-cell"><span class="outline-ticker-chip ${levelClass}">${escapeHtml(ticker)}</span></td>
       <td class="outline-cell outline-name">${escapeHtml(node.name || "")}</td>
       <td class="outline-cell">${escapeHtml(node.currency || "")}</td>
       <td class="outline-cell outline-parent">${escapeHtml(parentTicker || "—")}</td>

@@ -1883,13 +1883,6 @@ button:disabled:hover {
   border-bottom: 1px solid rgba(226, 232, 240, 0.7);
 }
 
-/* Bottom-level portfolios get a light green wash so the end of each
-   branch is obvious at a glance. Listed before the state rules below
-   so hover, selection, and QC colours still win. */
-.outline-row.leaf {
-  background: rgba(209, 250, 229, 0.45);
-}
-
 .outline-row:hover {
   background: var(--primary-soft);
 }
@@ -2003,32 +1996,50 @@ button:disabled:hover {
   font-weight: 800;
 }
 
+.outline-ticker-chip {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+/* Bottom-level portfolios get a small light-green chip behind the ticker
+   in the Ticker column, so the end of each branch is obvious at a glance. */
+.outline-row.leaf .outline-ticker-chip {
+  background: rgba(209, 250, 229, 0.75);
+}
+
 .outline-ticker.level-1,
+.outline-ticker-chip.level-1,
 .level-tag.level-1 {
   color: #991b1b;
 }
 
 .outline-ticker.level-2,
+.outline-ticker-chip.level-2,
 .level-tag.level-2 {
   color: #b91c1c;
 }
 
 .outline-ticker.level-3,
+.outline-ticker-chip.level-3,
 .level-tag.level-3 {
   color: #c2410c;
 }
 
 .outline-ticker.level-4,
+.outline-ticker-chip.level-4,
 .level-tag.level-4 {
   color: #15803d;
 }
 
 .outline-ticker.level-5,
+.outline-ticker-chip.level-5,
 .level-tag.level-5 {
   color: #0f766e;
 }
 
 .outline-ticker.level-6,
+.outline-ticker-chip.level-6,
 .level-tag.level-6 {
   color: #1d4ed8;
 }
